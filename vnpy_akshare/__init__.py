@@ -146,6 +146,9 @@ class Datafeed(BaseDatafeed):
                                         continue
                                 if not date_time:
                                     date_time = datetime.now()
+                            elif hasattr(row[date_field], 'year') and hasattr(row[date_field], 'month') and hasattr(row[date_field], 'day'):
+                                # Convert date object to datetime object
+                                date_time = datetime(row[date_field].year, row[date_field].month, row[date_field].day)
                             else:
                                 date_time = row[date_field]
                         except:
@@ -202,10 +205,15 @@ class Datafeed(BaseDatafeed):
                 bars = []
                 for _, row in df.iterrows():
                     try:
+                        # Ensure datetime object
+                        date_time = row['date']
+                        if hasattr(date_time, 'year') and hasattr(date_time, 'month') and hasattr(date_time, 'day') and not hasattr(date_time, 'hour'):
+                            date_time = datetime(date_time.year, date_time.month, date_time.day)
+                            
                         bar = BarData(
                             symbol=symbol,
                             exchange=req.exchange,
-                            datetime=row['date'],
+                            datetime=date_time,
                             interval=interval,
                             volume=float(row['volume']),
                             open_price=float(row['open']),

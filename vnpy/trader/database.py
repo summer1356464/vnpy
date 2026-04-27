@@ -3,6 +3,7 @@ from datetime import datetime
 from types import ModuleType
 from dataclasses import dataclass
 from importlib import import_module
+from typing import Union
 
 from .constant import Interval, Exchange
 from .object import BarData, TickData
@@ -29,11 +30,11 @@ class BarOverview:
     """
 
     symbol: str = ""
-    exchange: Exchange | None = None
-    interval: Interval | None = None
+    exchange: Union[Exchange, None] = None
+    interval: Union[Interval, None] = None
     count: int = 0
-    start: datetime | None = None
-    end: datetime | None = None
+    start: Union[datetime, None] = None
+    end: Union[datetime, None] = None
 
 
 @dataclass
@@ -43,10 +44,10 @@ class TickOverview:
     """
 
     symbol: str = ""
-    exchange: Exchange | None = None
+    exchange: Union[Exchange, None] = None
     count: int = 0
-    start: datetime | None = None
-    end: datetime | None = None
+    start: Union[datetime, None] = None
+    end: Union[datetime, None] = None
 
 
 class BaseDatabase(ABC):
@@ -133,7 +134,7 @@ class BaseDatabase(ABC):
         pass
 
 
-database: BaseDatabase | None = None
+database: Union[BaseDatabase, None] = None
 
 
 def get_database() -> BaseDatabase:

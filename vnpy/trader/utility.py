@@ -9,7 +9,7 @@ from pathlib import Path
 from collections.abc import Callable
 from decimal import Decimal
 from math import floor, ceil
-from typing import overload, Literal
+from typing import overload, Literal, Optional
 
 import numpy as np
 import talib
@@ -177,9 +177,9 @@ class BarGenerator:
         self,
         on_bar: Callable,
         window: int = 0,
-        on_window_bar: Callable | None = None,
+        on_window_bar: Optional[Callable] = None,
         interval: Interval = Interval.MINUTE,
-        daily_end: time | None = None
+        daily_end: Optional[time] = None
     ) -> None:
         """Constructor"""
         self.bar: BarData | None = None
