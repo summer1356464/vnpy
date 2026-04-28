@@ -1,0 +1,6 @@
+{
+    "database.name": "sqlite",
+    "database.path": "database.db",
+    "datafeed.name": "akshare",
+    "datafeed.use_cache": true
+}

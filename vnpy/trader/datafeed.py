@@ -37,18 +37,22 @@ datafeed: BaseDatafeed | None = None
 
 
 def get_datafeed() -> BaseDatafeed:
-    """"""
-    # Return datafeed object if already inited
+    """
+    Get the global datafeed instance.
+    """
     global datafeed
     if datafeed:
         return datafeed
 
     # Read datafeed related global setting
     datafeed_name: str = SETTINGS["datafeed.name"]
+    use_cache: bool = SETTINGS.get("datafeed.use_cache", True)
 
+    # Create base datafeed
+    base_datafeed = BaseDatafeed()
+    
     if not datafeed_name:
-        datafeed = BaseDatafeed()
-
+        datafeed = base_datafeed
         print(_("没有配置要使用的数据服务，请修改全局配置中的datafeed相关内容"))
     else:
         module_name: str = f"vnpy_{datafeed_name}"
@@ -58,11 +62,22 @@ def get_datafeed() -> BaseDatafeed:
             module: ModuleType = import_module(module_name)
 
             # Create datafeed object from module
-            datafeed = module.Datafeed()
+            base_datafeed = module.Datafeed()
         # Use base class if failed
         except ModuleNotFoundError:
-            datafeed = BaseDatafeed()
-
             print(_("无法加载数据服务模块，请运行 pip install {} 尝试安装").format(module_name))
+    
+    # Wrap with cache if enabled, regardless of whether datafeed is base or custom
+    if use_cache:
+        try:
+            # Import inside function to avoid circular import
+            from .cached_datafeed import CachedDatafeed
+            datafeed = CachedDatafeed(network_datafeed=base_datafeed)
+            print(_("已启用数据缓存功能"))
+        except ImportError:
+            datafeed = base_datafeed
+            print(_("数据缓存模块导入失败，将使用原始数据源"))
+    else:
+        datafeed = base_datafeed
 
     return datafeed
