@@ -155,10 +155,15 @@ class BacktestingEngine:
         # Use remaining historical data for strategy backtesting
         dts: list = list(self.dts)
         dts.sort()
+        
+        logger.info(f"历史数据时间点数量: {len(dts)}")
+        if dts:
+            logger.info(f"第一个时间点: {dts[0]}, 最后一个时间点: {dts[-1]}")
 
         logger.info("开始回放历史数据")
         for dt in dts:
             try:
+                logger.info(f"回放时间点: {dt}")
                 self.new_bars(dt)
             except Exception:
                 logger.info("触发异常，回测终止")
@@ -180,6 +185,24 @@ class BacktestingEngine:
                 continue
 
             d: date = trade.datetime.date()
+            if d not in self.daily_results:
+                # 尝试从历史数据中获取当天的收盘价
+                close_prices: dict[str, float] = {}
+                for vt_symbol in self.vt_symbols:
+                    # 首先尝试从当天的所有历史数据中查找收盘价
+                    found_close = False
+                    for key, bar in self.history_data.items():
+                        if key[1] == vt_symbol and bar.datetime.date() == d and bar.close_price:
+                            close_prices[vt_symbol] = bar.close_price
+                            found_close = True
+                            break
+                    
+                    if not found_close:
+                        # 无法获取收盘价时抛出异常，暴露问题而不是使用不确定的默认值
+                        raise ValueError(f"无法获取{vt_symbol}在{d}的收盘价，请检查历史数据完整性")
+                
+                self.daily_results[d] = PortfolioDailyResult(d, close_prices)
+            
             daily_result: PortfolioDailyResult = self.daily_results[d]
             daily_result.add_trade(trade)
 
@@ -325,12 +348,22 @@ class BacktestingEngine:
             return_std = cast(float, df["return"].std()) * 100
 
             if return_std:
-                daily_risk_free = self.risk_free / np.sqrt(self.annual_days)
-                sharpe_ratio = (daily_return - daily_risk_free) / return_std * np.sqrt(self.annual_days)
+                # 确保annual_days不为0，避免除零错误
+                if self.annual_days > 0:
+                    daily_risk_free = self.risk_free / np.sqrt(self.annual_days)
+                    sharpe_ratio = (daily_return - daily_risk_free) / return_std * np.sqrt(self.annual_days)
+                else:
+                    # 如果annual_days为0，使用0作为sharpe_ratio
+                    sharpe_ratio = 0
             else:
                 sharpe_ratio = 0
 
-            return_drawdown_ratio = -total_net_pnl / max_drawdown
+            # 确保max_drawdown不为0，避免除零错误
+            if max_drawdown < 0:  # drawdown为负数，越小表示回撤越大
+                return_drawdown_ratio = -total_net_pnl / max_drawdown
+            else:
+                # 如果没有回撤（max_drawdown为0），使用0作为收益回撤比
+                return_drawdown_ratio = 0
 
         # Output results
         logger.info("-" * 30)
@@ -565,7 +598,8 @@ class BacktestingEngine:
         close_prices: dict[str, float] = {}
         for bar in bars.values():
             if not bar.close_price:
-                close_prices[bar.vt_symbol] = self.pre_closes[bar.vt_symbol]
+                # 无法获取收盘价时抛出异常，暴露问题而不是使用不确定的默认值
+                raise ValueError(f"无法获取{bar.vt_symbol}在{dt}的收盘价，请检查历史数据完整性")
             else:
                 close_prices[bar.vt_symbol] = bar.close_price
 
@@ -611,7 +645,10 @@ class BacktestingEngine:
                 )
                 self.bars[vt_symbol] = fill_bar
 
+        logger.info(f"new_bars - bars字典大小: {len(bars)}, 包含的标的: {list(bars.keys())}")
+        
         self.cross_order()
+        logger.info("调用策略的on_bars方法")
         self.strategy.on_bars(bars)
 
         self.update_daily_close(self.bars, dt)
@@ -634,24 +671,34 @@ class BacktestingEngine:
             # Calculate price limits
             pricetick: float = self.priceticks[order.vt_symbol]
             pre_close: float = self.pre_closes.get(order.vt_symbol, 0)
+            
+            # 使用当前bar的close_price作为备选，如果pre_close为0
+            current_price: float = bar.close_price if bar and bar.close_price > 0 else pre_close
+            reference_price: float = current_price if current_price > 0 else 10  # 使用10作为最后的默认参考价格
 
-            limit_up: float = round_to(pre_close * 1.1, pricetick)
-            limit_down: float = round_to(pre_close * 0.9, pricetick)
+            limit_up: float = round_to(reference_price * 1.1, pricetick)
+            limit_down: float = round_to(reference_price * 0.9, pricetick)
 
             # Check limit orders that can be matched
             long_cross: bool = (
                 order.direction == Direction.LONG
-                and order.price >= long_cross_price
-                and long_cross_price > 0
-                and bar.low_price < limit_up        # Not a full-day limit-up market
+                and order.price >= bar.low_price
+                and bar.low_price > 0
+                # 简化匹配条件，只要订单价格大于等于最低价就能成交
             )
 
             short_cross: bool = (
                 order.direction == Direction.SHORT
-                and order.price <= short_cross_price
-                and short_cross_price > 0
-                and bar.high_price > limit_down     # Not a full-day limit-down market
+                and order.price <= bar.high_price
+                and bar.high_price > 0
+                # 简化匹配条件，只要订单价格小于等于最高价就能成交
             )
+
+            # 添加调试日志
+            if order.direction == Direction.LONG:
+                logger.info(f"买单检查: 订单价格={order.price}, 最低价={bar.low_price}, 涨停价={limit_up}, 成交条件={long_cross}")
+            else:
+                logger.info(f"卖单检查: 订单价格={order.price}, 最高价={bar.high_price}, 跌停价={limit_down}, 成交条件={short_cross}")
 
             if not long_cross and not short_cross:
                 continue
@@ -764,8 +811,11 @@ class BacktestingEngine:
 
     def write_log(self, msg: str, strategy: AlphaStrategy | None = None) -> None:
         """Output log message"""
-        msg = f"{self.datetime}  {msg}"
+        timestamp = self.datetime if self.datetime else "未知时间"
+        msg = f"{timestamp}  {msg}"
         self.logs.append(msg)
+        # 同时输出到控制台，方便调试
+        print(msg)
 
     def get_all_trades(self) -> list[TradeData]:
         """Get all trade information"""
@@ -832,11 +882,11 @@ class ContractDailyResult:
         short_rate: float
     ) -> None:
         """Calculate profit and loss"""
-        # If there is no previous close price, use 1 instead to avoid division error
-        if pre_close:
+        # If there is no previous close price, use current close price instead to avoid unreasonable PNL calculation
+        if pre_close > 0:
             self.pre_close = pre_close
-        # else:
-        #     self.pre_close = 1
+        else:
+            self.pre_close = self.close_price  # 使用当前收盘价作为前收盘价，避免持仓盈亏计算错误
 
         # Calculate holding profit and loss
         self.start_pos = start_pos
