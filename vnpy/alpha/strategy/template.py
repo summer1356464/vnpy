@@ -130,7 +130,7 @@ class AlphaStrategy(metaclass=ABCMeta):
         """Set target position"""
         self.target_data[vt_symbol] = target
 
-    def execute_trading(self, bars: dict[str, BarData], price_add: float) -> None:
+    def execute_trading(self, bars: dict[str, BarData], price_type: str = "close", price_add: float = 0) -> None:
         """Execute position adjustment based on targets"""
         self.cancel_all()
 
@@ -141,11 +141,27 @@ class AlphaStrategy(metaclass=ABCMeta):
             pos: float = self.get_pos(vt_symbol)
             diff: float = target - pos
 
+            # Get order price based on price_type
+            if price_type == "close":
+                order_price = bar.close_price
+            elif price_type == "open":
+                order_price = bar.open_price
+            elif price_type == "high":
+                order_price = bar.high_price
+            elif price_type == "low":
+                order_price = bar.low_price
+            elif price_type == "avg":
+                order_price = (bar.open_price + bar.close_price + bar.high_price + bar.low_price) / 4
+            else:
+                # Default to close price if price_type is invalid
+                order_price = bar.close_price
+                self.write_log(f"Invalid price_type: {price_type}, using close price instead")
+
+            # Add price adjustment
+            order_price += price_add
+
             # Long position
             if diff > 0:
-                # Calculate long order price
-                order_price: float = bar.close_price * (1 + price_add)
-
                 # Calculate cover and buy volumes
                 cover_volume: float = 0
                 buy_volume: float = 0
@@ -164,9 +180,6 @@ class AlphaStrategy(metaclass=ABCMeta):
                     self.buy(vt_symbol, order_price, buy_volume)
             # Short position
             elif diff < 0:
-                # Calculate short order price
-                order_price = bar.close_price * (1 - price_add)
-
                 # Calculate sell and short volumes
                 sell_volume: float = 0
                 short_volume: float = 0
