@@ -42,3 +42,5 @@ _templates
 lab/
 /.mypy_cache
 database.db
+alpha_lab/
+backtest_results/
