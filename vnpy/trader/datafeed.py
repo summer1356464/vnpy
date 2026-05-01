@@ -71,8 +71,8 @@ def get_datafeed() -> BaseDatafeed:
     if use_cache:
         try:
             # Import inside function to avoid circular import
-            from .cached_datafeed import CachedDatafeed
-            datafeed = CachedDatafeed(network_datafeed=base_datafeed)
+            from .cached_datafeed import create_cached_datafeed
+            datafeed = create_cached_datafeed(base_datafeed)
             print(_("已启用数据缓存功能"))
         except ImportError:
             datafeed = base_datafeed

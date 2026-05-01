@@ -1,0 +1,36 @@
+from setuptools import setup, find_packages
+
+setup(
+    name="vnpy_directdb_cache",
+    version="1.0.0",
+    author="VeighNa Team",
+    author_email="vn.py@foxmail.com",
+    description="Direct Database Caching Datafeed for VeighNa Framework",
+    license="MIT",
+    url="https://github.com/vnpy/vnpy",
+    keywords=["veighna", "quant", "trading", "finance"],
+    packages=find_packages(),
+    install_requires=[
+        "vnpy>=3.0.0",
+    ],
+    classifiers=[
+        "Development Status :: 5 - Production/Stable",
+        "Operating System :: Microsoft :: Windows :: Windows 10",
+        "Operating System :: Microsoft :: Windows :: Windows 11",
+        "Operating System :: Microsoft :: Windows :: Windows Server 2008",
+        "Operating System :: Microsoft :: Windows :: Windows Server 2012",
+        "Operating System :: Microsoft :: Windows :: Windows Server 2012",
+        "Operating System :: Microsoft :: Windows :: Windows Server 2016",
+        "Operating System :: Unix",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "License :: OSI Approved :: MIT License",
+        "Topic :: Office/Business :: Financial :: Investment",
+    ],
+    python_requires='>=3.8',
+    zip_safe=False,
+)
