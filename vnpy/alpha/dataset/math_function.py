@@ -165,3 +165,11 @@ def pow2(base: DataProxy, exponent: DataProxy) -> DataProxy:
     return DataProxy(df)
 
 
+def cast_to_int(feature: DataProxy) -> DataProxy:
+    """Cast feature values to integer type"""
+    df: pl.DataFrame = feature.df.with_columns(
+        pl.col("data").cast(pl.Int32).alias("data")
+    )
+    return DataProxy(df)
+
+
