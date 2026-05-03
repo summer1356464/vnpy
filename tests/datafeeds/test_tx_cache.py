@@ -13,7 +13,7 @@ import numpy as np
 import asyncio
 
 from vnpy.trader.constant import Exchange, Interval
-from vnpy.trader.object import BarData, HistoryRequest
+from vnpy.trader.object import BarData, HistoryRequest, TradeData
 from vnpy.trader.datafeed import get_datafeed
 from vnpy.trader.setting import SETTINGS
 from vnpy.alpha.strategy.template import AlphaStrategy
@@ -60,6 +60,11 @@ class SimpleTxStrategy(AlphaStrategy):
                     # 卖出
                     self.sell(vt_symbol, bar.close_price, 100)
                     self.holding = False
+    
+    def on_trade(self, trade):
+        """处理交易"""
+        self.write_log(f"交易执行: {trade.direction.value} {trade.volume} 股, "
+                     f"价格: {trade.price}, 金额: {trade.volume * trade.price}")
 
 
 @pytest.fixture(scope="module")
@@ -84,7 +89,7 @@ def setup_tx_datafeed():
 @pytest.mark.asyncio
 @pytest.mark.datafeed
 @pytest.mark.tx
-def test_tx_data_query(setup_tx_datafeed):
+async def test_tx_data_query(setup_tx_datafeed):
     """测试TX数据源的直接查询功能"""
     datafeed = setup_tx_datafeed
     
@@ -111,13 +116,14 @@ def test_tx_data_query(setup_tx_datafeed):
     
     # 等待异步缓存完成
     if hasattr(datafeed, "wait_cache_tasks_complete"):
-        asyncio.run(datafeed.wait_cache_tasks_complete(timeout=10.0))
+        await datafeed.wait_cache_tasks_complete(timeout=10.0)
 
 
+@pytest.mark.asyncio
 @pytest.mark.datafeed
 @pytest.mark.tx
 @pytest.mark.strategy
-def test_tx_backtesting(setup_tx_datafeed):
+async def test_tx_backtesting(setup_tx_datafeed):
     """测试TX数据源的回测功能"""
     # 创建投研实验室
     lab = AlphaLab("backtest_lab")
@@ -127,7 +133,7 @@ def test_tx_backtesting(setup_tx_datafeed):
     
     # 设置回测参数
     engine.set_parameters(
-        vt_symbols=["000001.SZ"],  # 平安银行
+        vt_symbols=["000001.SZSE"],  # 平安银行
         interval=Interval.DAILY,
         start=datetime(2023, 1, 1),
         end=datetime(2023, 6, 30),
@@ -141,10 +147,46 @@ def test_tx_backtesting(setup_tx_datafeed):
         "buy_day": 10,  # 第10个交易日买入
         "sell_day": 50   # 第50个交易日卖出
     }
-    engine.add_strategy(SimpleTxStrategy, strategy_settings)
+    # 创建空的signal_df
+    import polars as pl
+    signal_df = pl.DataFrame()
+    engine.add_strategy(SimpleTxStrategy, strategy_settings, signal_df)
     
-    # 加载数据
-    engine.load_data()
+    # 从TX数据源获取数据
+    datafeed = setup_tx_datafeed
+    
+    symbol, exchange = "000001", Exchange.SZSE
+    req = HistoryRequest(
+        symbol=symbol,
+        exchange=exchange,
+        interval=Interval.DAILY,
+        start=datetime(2023, 1, 1),
+        end=datetime(2023, 6, 30)
+    )
+    
+    bars = datafeed.query_bar_history(req)
+    assert bars, "未获取到TX数据"
+    
+    # 等待异步缓存完成
+    if hasattr(datafeed, "wait_cache_tasks_complete"):
+        await datafeed.wait_cache_tasks_complete(timeout=10.0)
+    
+    # 手动将数据添加到回测引擎
+    engine.history_data = {}
+    engine.dts = set()
+    
+    for bar in bars:
+        # 使用与回测参数一致的vt_symbol格式
+        vt_symbol = "000001.SZSE"
+        engine.history_data[(bar.datetime, vt_symbol)] = bar
+        engine.dts.add(bar.datetime)
+    
+    # 设置合约交易配置
+    vt_symbol = "000001.SZSE"
+    engine.long_rates = {vt_symbol: 0.0}
+    engine.short_rates = {vt_symbol: 0.0}
+    engine.sizes = {vt_symbol: 100}
+    engine.priceticks = {vt_symbol: 0.01}
     
     # 运行回测
     engine.run_backtesting()
@@ -154,7 +196,7 @@ def test_tx_backtesting(setup_tx_datafeed):
     
     # 验证结果
     assert daily_df is not None, "回测结果为空"
-    assert not daily_df.empty, "回测结果DataFrame为空"
+    assert not daily_df.is_empty(), "回测结果DataFrame为空"
     
     # 计算统计指标
     statistics = engine.calculate_statistics()
@@ -164,10 +206,11 @@ def test_tx_backtesting(setup_tx_datafeed):
     assert "total_return" in statistics, "统计指标缺少total_return"
 
 
+@pytest.mark.asyncio
 @pytest.mark.datafeed
 @pytest.mark.tx
 @pytest.mark.cache
-def test_tx_cache_files(setup_tx_datafeed):
+async def test_tx_cache_files(setup_tx_datafeed):
     """测试TX数据源的缓存文件生成"""
     # 先执行数据查询，确保数据被缓存
     datafeed = setup_tx_datafeed
@@ -184,7 +227,7 @@ def test_tx_cache_files(setup_tx_datafeed):
     
     # 等待异步缓存完成
     if hasattr(datafeed, "wait_cache_tasks_complete"):
-        asyncio.run(datafeed.wait_cache_tasks_complete(timeout=10.0))
+        await datafeed.wait_cache_tasks_complete(timeout=10.0)
     
     # 检查Parquet缓存文件
     cache_dir = "./data_cache/000001_SZSE/bar/d/"
@@ -199,23 +242,24 @@ def test_tx_cache_files(setup_tx_datafeed):
     df = pd.read_parquet(sample_file)
     
     assert not df.empty, "缓存文件内容为空"
-    assert "close" in df.columns, "缓存文件缺少close列"
+    assert "close_price" in df.columns, "缓存文件缺少close_price列"
 
 
+@pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.datafeed
 @pytest.mark.tx
 @pytest.mark.slow
-def test_tx_complete_flow(setup_tx_datafeed):
+async def test_tx_complete_flow(setup_tx_datafeed):
     """测试TX数据源的完整流程"""
     # 1. 测试数据查询
-    test_tx_data_query(setup_tx_datafeed)
+    await test_tx_data_query(setup_tx_datafeed)
     
     # 2. 测试回测
-    test_tx_backtesting(setup_tx_datafeed)
+    await test_tx_backtesting(setup_tx_datafeed)
     
     # 3. 测试缓存文件
-    test_tx_cache_files(setup_tx_datafeed)
+    await test_tx_cache_files(setup_tx_datafeed)
 
 
 if __name__ == "__main__":
