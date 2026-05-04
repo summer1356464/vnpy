@@ -14,7 +14,7 @@ from vnpy.trader.object import HistoryRequest
 from vnpy.trader.utility import extract_vt_symbol
 from vnpy.alpha.lab import AlphaLab
 
-from get_hs300_constituents import get_hs300_constituents
+from tools.get_hs300_constituents import get_hs300_constituents
 
 
 # 设置使用tx数据源和缓存

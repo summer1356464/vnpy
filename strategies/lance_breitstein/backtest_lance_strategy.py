@@ -12,7 +12,7 @@ from vnpy.alpha.lab import AlphaLab
 from vnpy.alpha.strategy.backtesting import BacktestingEngine
 from vnpy.alpha.strategy.strategies.lance_breitstein_strategy import LanceBreitsteinStrategy
 
-from get_hs300_constituents import get_hs300_constituents
+from tools.get_hs300_constituents import get_hs300_constituents
 
 
 # 设置使用tx数据源和缓存
@@ -26,8 +26,9 @@ def main():
     hs300_stocks = get_hs300_constituents()
     print(f"沪深300成分股数量: {len(hs300_stocks)}")
     
-    # 创建AlphaLab实例
-    lab_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alpha_lab")
+    # 创建AlphaLab实例，使用项目根目录下的alpha_lab
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    lab_path = os.path.join(project_root, "alpha_lab")
     lab = AlphaLab(lab_path)
     
     # 初始化合约设置
