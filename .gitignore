@@ -45,3 +45,4 @@ database.db
 alpha_lab/
 backtest_results/
 data_cache/
+examples/candle_chart/*.html
