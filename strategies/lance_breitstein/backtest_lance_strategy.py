@@ -201,24 +201,73 @@ def main():
         print(f"总共交易了 {len(traded_symbols)} 只标的")
         print(f"交易标的列表：{list(traded_symbols)}")
         
-        # 输出每个标的的买卖日志
-        print("\n各标的交易日志：")
+        # 计算每个标的的累计收益
+        print("\n计算各标的收益...")
+        symbol_returns = {}
+        
         for vt_symbol in traded_symbols:
-            print(f"\n{vt_symbol} 交易记录：")
             symbol_trades = [trade for trade in engine.trades.values() if trade.vt_symbol == vt_symbol]
             symbol_trades.sort(key=lambda x: x.datetime)
             
+            # 计算该标的的累计收益
+            total_return = 0.0
+            position = 0.0  # 当前持仓量
+            avg_entry_price = 0.0  # 平均持仓成本
+            
             for trade in symbol_trades:
-                direction = "买入" if trade.direction == Direction.LONG else "卖出"
-                offset = "开仓" if trade.offset == Offset.OPEN else "平仓"
-                print(f"  {trade.datetime} - {direction}{offset}: {trade.volume}手 @ {trade.price}元")
+                if trade.direction == Direction.LONG:
+                    if trade.offset == Offset.OPEN:
+                        # 开仓
+                        total_cost = position * avg_entry_price
+                        new_cost = trade.volume * trade.price
+                        position += trade.volume
+                        avg_entry_price = (total_cost + new_cost) / position
+                    elif trade.offset == Offset.CLOSE:
+                        # 平仓
+                        if position > 0:
+                            close_quantity = min(trade.volume, position)
+                            profit = (trade.price - avg_entry_price) * close_quantity
+                            total_return += profit
+                            position -= close_quantity
+                            # 如果还有剩余持仓，重新计算平均成本
+                            if position > 0:
+                                # 这里简化处理，实际应该更精确计算
+                                pass
+                
+            symbol_returns[vt_symbol] = total_return
+            print(f"{vt_symbol} 累计收益: {total_return:.2f}")
+        
+        # 按收益排序标的
+        sorted_symbols = sorted(symbol_returns.items(), key=lambda x: x[1], reverse=True)
+        
+        # 选择要展示的标的：收益最高10个、最低10个、中位收益10个
+        top_10 = sorted_symbols[:10]
+        bottom_10 = sorted_symbols[-10:]
+        
+        # 选择中位收益附近的10个标的
+        total_traded = len(sorted_symbols)
+        mid_idx = total_traded // 2
+        mid_10_start = max(0, mid_idx - 5)
+        mid_10_end = min(total_traded, mid_idx + 5)
+        mid_10 = sorted_symbols[mid_10_start:mid_10_end]
+        
+        # 合并要展示的标的列表
+        selected_symbols = [symbol for symbol, _ in top_10 + bottom_10 + mid_10]
+        # 去重
+        selected_symbols = list(dict.fromkeys(selected_symbols))
+        
+        print(f"\n选择展示的标的：")
+        print(f"收益最高10个: {[symbol for symbol, _ in top_10]}")
+        print(f"收益最低10个: {[symbol for symbol, _ in bottom_10]}")
+        print(f"中位收益10个: {[symbol for symbol, _ in mid_10]}")
+        print(f"总共展示 {len(selected_symbols)} 个标的")
         
         # 绘制带有买卖点标注的K线图
         from vnpy.trader.object import BarData
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
         
-        def plot_symbol_with_signals(vt_symbol, bars, trades):
+        def plot_symbol_with_signals(vt_symbol, bars, trades, total_return):
             """绘制单个标的的K线图并标注买卖点"""
             # 准备K线数据
             dates = [bar.datetime for bar in bars]
@@ -287,18 +336,14 @@ def main():
                 )
             
             # 设置图表布局
-            fig.update_layout(title=f"{vt_symbol} K线图及买卖点标注", 
-                            xaxis_title="日期", 
-                            yaxis_title="价格", 
-                            height=800, 
-                            width=1200)
+            fig.update_layout(title=f"{vt_symbol} K线图及买卖点标注 (累计收益: {total_return:.2f})")
             
             # 显示图表
             fig.show()
         
-        # 为每个交易过的标的绘制K线图
-        print("\n绘制各标的K线图及买卖点标注...")
-        for vt_symbol in traded_symbols:
+        # 为选中的标的绘制K线图
+        print("\n绘制选中标的的K线图及买卖点标注...")
+        for vt_symbol in selected_symbols:
             # 获取该标的的K线数据
             symbol_bars = []
             for dt in sorted(engine.dts):
@@ -310,8 +355,9 @@ def main():
             symbol_trades = [trade for trade in engine.trades.values() if trade.vt_symbol == vt_symbol]
             
             if symbol_bars and symbol_trades:
-                print(f"绘制 {vt_symbol} 的K线图...")
-                plot_symbol_with_signals(vt_symbol, symbol_bars, symbol_trades)
+                total_return = symbol_returns[vt_symbol]
+                print(f"绘制 {vt_symbol} 的K线图 (收益: {total_return:.2f})...")
+                plot_symbol_with_signals(vt_symbol, symbol_bars, symbol_trades, total_return)
 
 
 if __name__ == "__main__":
