@@ -72,8 +72,15 @@ def get_datafeed() -> BaseDatafeed:
         try:
             # Import inside function to avoid circular import
             from .cached_datafeed import create_cached_datafeed
-            datafeed = create_cached_datafeed(base_datafeed)
+            from .parquet_cache_backend import ParquetCacheBackend
+            
+            # Use cache path from settings if available
+            cache_path = SETTINGS.get("datafeed.cache_path", "./data_cache")
+            cache_backend = ParquetCacheBackend(cache_root=cache_path)
+            
+            datafeed = create_cached_datafeed(base_datafeed, cache_backend)
             print(_("已启用数据缓存功能"))
+            print(f"缓存路径: {cache_path}")
         except ImportError:
             datafeed = base_datafeed
             print(_("数据缓存模块导入失败，将使用原始数据源"))

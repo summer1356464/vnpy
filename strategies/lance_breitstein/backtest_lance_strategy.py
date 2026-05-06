@@ -27,12 +27,17 @@ SETTINGS["datafeed.cache_path"] = "./data_cache"  # 设置缓存目录
 
 async def download_data(datafeed, lab, vt_symbols, interval, start, end):
     """异步下载数据"""
-    print("\n开始从数据源下载历史数据...")
+    print("\n开始检查并下载历史数据...")
     
     # 下载标的数据
     for vt_symbol in vt_symbols:
+        # 先检查AlphaLab中是否已有数据
+        existing_bars = lab.load_bar_data(vt_symbol, interval, start, end)
+        if existing_bars and len(existing_bars) > 0:
+            print(f"✓ {vt_symbol} 在AlphaLab中已有数据 ({len(existing_bars)}条)，跳过下载")
+            continue
+        
         symbol, exchange = extract_vt_symbol(vt_symbol)
-        print(f"下载 {vt_symbol} 数据...")
         
         # 创建历史数据请求
         req = HistoryRequest(
@@ -43,39 +48,44 @@ async def download_data(datafeed, lab, vt_symbols, interval, start, end):
             end=end
         )
         
-        # 从数据源获取数据
+        # 从数据源获取数据（数据源会自动使用TX+Cache缓存）
         bars = datafeed.query_bar_history(req)
         
         if bars:
-            print(f"  ✓ 成功获取 {len(bars)} 条数据")
+            print(f"✓ 从数据源获取 {vt_symbol} 数据成功 ({len(bars)}条)")
             # 保存到AlphaLab
             lab.save_bar_data(bars)
         else:
-            print(f"  ✗ 未获取到数据")
+            print(f"✗ 未获取到 {vt_symbol} 数据")
     
     # 下载沪深300指数数据用于基准对比
-    print("\n下载沪深300指数数据用于基准对比...")
     hs300_symbol = "000300.SSE"
-    hs300_symbol_clean, hs300_exchange = extract_vt_symbol(hs300_symbol)
-    
-    # 创建历史数据请求
-    hs300_req = HistoryRequest(
-        symbol=hs300_symbol_clean,
-        exchange=hs300_exchange,
-        interval=interval,
-        start=start,
-        end=end
-    )
-    
-    # 从数据源获取数据
-    hs300_bars = datafeed.query_bar_history(hs300_req)
-    
-    if hs300_bars:
-        print(f"  ✓ 成功获取沪深300指数 {len(hs300_bars)} 条数据")
-        # 保存到AlphaLab
-        lab.save_bar_data(hs300_bars)
+    # 先检查AlphaLab中是否已有数据
+    existing_hs300_bars = lab.load_bar_data(hs300_symbol, interval, start, end)
+    if existing_hs300_bars and len(existing_hs300_bars) > 0:
+        print(f"✓ 沪深300指数在AlphaLab中已有数据 ({len(existing_hs300_bars)}条)，跳过下载")
     else:
-        print(f"  ✗ 未获取到沪深300指数数据")
+        print("\n下载沪深300指数数据用于基准对比...")
+        hs300_symbol_clean, hs300_exchange = extract_vt_symbol(hs300_symbol)
+        
+        # 创建历史数据请求
+        hs300_req = HistoryRequest(
+            symbol=hs300_symbol_clean,
+            exchange=hs300_exchange,
+            interval=interval,
+            start=start,
+            end=end
+        )
+        
+        # 从数据源获取数据（数据源会自动使用TX+Cache缓存）
+        hs300_bars = datafeed.query_bar_history(hs300_req)
+        
+        if hs300_bars:
+            print(f"✓ 从数据源获取沪深300指数数据成功 ({len(hs300_bars)}条)")
+            # 保存到AlphaLab
+            lab.save_bar_data(hs300_bars)
+        else:
+            print(f"✗ 未获取到沪深300指数数据")
     
     # 等待所有异步缓存任务完成
     await asyncio.sleep(1)

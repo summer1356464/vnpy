@@ -1,5 +1,5 @@
 from typing import List, Optional, Callable, TypeVar, Generic
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 
 from .datafeed import BaseDatafeed
@@ -143,15 +143,21 @@ class CachedDatafeedWrapper(BaseDatafeed):
         if not cache_bars or cache_start is None or cache_end is None:
             need_network_query = True
         else:
-            # Check if start date is covered
-            if cache_start > start:
+            # If cache completely covers the request range, no need for network query
+            if cache_start <= start and cache_end >= end:
+                need_network_query = False
+            else:
                 need_network_query = True
-                network_start = start
-            
-            # Check if end date is covered
-            if cache_end < end:
-                need_network_query = True
-                network_end = end
+                # Calculate the missing date ranges
+                if cache_start > start:
+                    network_start = start
+                else:
+                    network_start = cache_end + timedelta(days=1)  # 从缓存结束日期的下一天开始获取
+                
+                if cache_end < end:
+                    network_end = end
+                else:
+                    network_end = cache_start - timedelta(days=1)  # 只获取到缓存开始日期的前一天
         
         # Step 3: Query from network if needed
         net_bars = []
