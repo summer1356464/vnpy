@@ -7,7 +7,7 @@ import os
 import sys
 import asyncio
 
-from vnpy.trader.constant import Interval
+from vnpy.trader.constant import Interval, Direction, Offset
 from vnpy.trader.setting import SETTINGS
 from vnpy.trader.datafeed import get_datafeed
 from vnpy.trader.object import HistoryRequest
@@ -29,9 +29,7 @@ async def download_data(datafeed, lab, vt_symbols, interval, start, end):
     """异步下载数据"""
     print("\n开始从数据源下载历史数据...")
     
-    # 创建事件循环
-    loop = asyncio.get_event_loop()
-    
+    # 下载标的数据
     for vt_symbol in vt_symbols:
         symbol, exchange = extract_vt_symbol(vt_symbol)
         print(f"下载 {vt_symbol} 数据...")
@@ -54,6 +52,30 @@ async def download_data(datafeed, lab, vt_symbols, interval, start, end):
             lab.save_bar_data(bars)
         else:
             print(f"  ✗ 未获取到数据")
+    
+    # 下载沪深300指数数据用于基准对比
+    print("\n下载沪深300指数数据用于基准对比...")
+    hs300_symbol = "000300.SSE"
+    hs300_symbol_clean, hs300_exchange = extract_vt_symbol(hs300_symbol)
+    
+    # 创建历史数据请求
+    hs300_req = HistoryRequest(
+        symbol=hs300_symbol_clean,
+        exchange=hs300_exchange,
+        interval=interval,
+        start=start,
+        end=end
+    )
+    
+    # 从数据源获取数据
+    hs300_bars = datafeed.query_bar_history(hs300_req)
+    
+    if hs300_bars:
+        print(f"  ✓ 成功获取沪深300指数 {len(hs300_bars)} 条数据")
+        # 保存到AlphaLab
+        lab.save_bar_data(hs300_bars)
+    else:
+        print(f"  ✗ 未获取到沪深300指数数据")
     
     # 等待所有异步缓存任务完成
     await asyncio.sleep(1)
@@ -99,26 +121,29 @@ def main():
     end = datetime(2025, 12, 31)
     capital = 1000000  # 初始资金100万
     
-    # 异步下载数据
-    asyncio.run(download_data(datafeed, lab, vt_symbols, interval, start, end))  # 下载所有股票数据
+    # 异步下载全量沪深300成分股数据
+    print(f"\n开始下载全量 {len(vt_symbols)} 只沪深300成分股数据...")
+    asyncio.run(download_data(datafeed, lab, vt_symbols, interval, start, end))
     
     engine.set_parameters(
-        vt_symbols=vt_symbols,
+        vt_symbols=vt_symbols,  # 使用全量沪深300成分股
         interval=interval,
         start=start,
         end=end,
         capital=capital
     )
     
-    # 添加策略
+    # 添加策略（参数与 LanceBreitsteinStrategy 新实现保持一致）
     strategy_setting = {
         "lookback_days": 120,
         "vwap_days": 20,
         "short_ma": 10,
-        "medium_ma": 30,
-        "long_ma": 60,
-        "trendline_points": 2,
-        "position_size": 0.1
+        "medium_ma": 20,   # MA20 —— Lance 常用回踩支撑位
+        "long_ma": 50,    # MA50 —— Lance 常用趋势基准
+        "trendline_points": 3,  # 3个摆动低点构建趋势线
+        "swing_window": 5,      # 摆动点识别窗口
+        "pullback_tolerance": 0.03,  # 回踩容差 3%
+        "position_size": 0.1   # 每个标的最多占总资金 10%
     }
     
     # 创建空的信号DataFrame
@@ -148,6 +173,135 @@ def main():
         print("\n策略统计指标：")
         for key, value in stats.items():
             print(f"{key}: {value}")
+        
+        # 显示策略与基准收益率对比（沪深300指数）
+        print("\n显示策略与基准收益率对比...")
+        engine.show_performance("000300.SSE")  # 沪深300指数
+        
+        # 显示基本图表
+        print("\n显示基本回测图表...")
+        engine.show_chart()
+        
+        # 输出交易标的总结
+        print("\n交易标的总结：")
+        traded_symbols = set()
+        for trade in engine.trades.values():
+            traded_symbols.add(trade.vt_symbol)
+        
+        print(f"总共交易了 {len(traded_symbols)} 只标的")
+        print(f"交易标的列表：{list(traded_symbols)}")
+        
+        # 输出每个标的的买卖日志
+        print("\n各标的交易日志：")
+        for vt_symbol in traded_symbols:
+            print(f"\n{vt_symbol} 交易记录：")
+            symbol_trades = [trade for trade in engine.trades.values() if trade.vt_symbol == vt_symbol]
+            symbol_trades.sort(key=lambda x: x.datetime)
+            
+            for trade in symbol_trades:
+                direction = "买入" if trade.direction == Direction.LONG else "卖出"
+                offset = "开仓" if trade.offset == Offset.OPEN else "平仓"
+                print(f"  {trade.datetime} - {direction}{offset}: {trade.volume}手 @ {trade.price}元")
+        
+        # 绘制带有买卖点标注的K线图
+        from vnpy.trader.object import BarData
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+        
+        def plot_symbol_with_signals(vt_symbol, bars, trades):
+            """绘制单个标的的K线图并标注买卖点"""
+            # 准备K线数据
+            dates = [bar.datetime for bar in bars]
+            opens = [bar.open_price for bar in bars]
+            highs = [bar.high_price for bar in bars]
+            lows = [bar.low_price for bar in bars]
+            closes = [bar.close_price for bar in bars]
+            volumes = [bar.volume for bar in bars]
+            
+            # 准备买卖信号数据
+            buy_dates = []
+            buy_prices = []
+            sell_dates = []
+            sell_prices = []
+            
+            for trade in trades:
+                if trade.direction == Direction.LONG:
+                    buy_dates.append(trade.datetime)
+                    buy_prices.append(trade.price)
+                else:
+                    sell_dates.append(trade.datetime)
+                    sell_prices.append(trade.price)
+            
+            # 创建图表
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                               vertical_spacing=0.03, 
+                               row_heights=[0.8, 0.2])
+            
+            # 添加K线图
+            fig.add_trace(
+                go.Candlestick(x=dates, 
+                              open=opens, 
+                              high=highs, 
+                              low=lows, 
+                              close=closes, 
+                              name="K线"),
+                row=1, col=1
+            )
+            
+            # 添加成交量柱状图
+            fig.add_trace(
+                go.Bar(x=dates, y=volumes, name="成交量"),
+                row=2, col=1
+            )
+            
+            # 添加买入信号（绿色三角形，向上）
+            if buy_dates:
+                fig.add_trace(
+                    go.Scatter(x=buy_dates, 
+                              y=buy_prices, 
+                              mode="markers", 
+                              marker=dict(color="green", symbol="triangle-up", size=10), 
+                              name="买入"),
+                    row=1, col=1
+                )
+            
+            # 添加卖出信号（红色三角形，向下）
+            if sell_dates:
+                fig.add_trace(
+                    go.Scatter(x=sell_dates, 
+                              y=sell_prices, 
+                              mode="markers", 
+                              marker=dict(color="red", symbol="triangle-down", size=10), 
+                              name="卖出"),
+                    row=1, col=1
+                )
+            
+            # 设置图表布局
+            fig.update_layout(title=f"{vt_symbol} K线图及买卖点标注", 
+                            xaxis_title="日期", 
+                            yaxis_title="价格", 
+                            height=800, 
+                            width=1200)
+            
+            # 显示图表
+            fig.show()
+        
+        # 为每个交易过的标的绘制K线图
+        print("\n绘制各标的K线图及买卖点标注...")
+        for vt_symbol in traded_symbols:
+            # 获取该标的的K线数据
+            symbol_bars = []
+            for dt in sorted(engine.dts):
+                bar = engine.history_data.get((dt, vt_symbol))
+                if bar:
+                    symbol_bars.append(bar)
+            
+            # 获取该标的的交易记录
+            symbol_trades = [trade for trade in engine.trades.values() if trade.vt_symbol == vt_symbol]
+            
+            if symbol_bars and symbol_trades:
+                print(f"绘制 {vt_symbol} 的K线图...")
+                plot_symbol_with_signals(vt_symbol, symbol_bars, symbol_trades)
 
 
 if __name__ == "__main__":
