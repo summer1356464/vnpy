@@ -645,11 +645,53 @@ class BacktestingEngine:
                 )
                 self.bars[vt_symbol] = fill_bar
 
-        logger.info(f"new_bars - bars字典大小: {len(bars)}, 包含的标的: {list(bars.keys())}")
+        # 显示当前持仓和调仓列表（金额）
+        current_positions = {}  # symbol -> 持仓金额
+        for symbol, pos in self.strategy.pos_data.items():
+            if pos != 0 and symbol in self.bars:
+                price = self.bars[symbol].close_price
+                amount = pos * price
+                current_positions[symbol] = round(amount, 2)
         
-        self.cross_order()
+        # 计算待处理订单的金额和方向
+        pending_orders_info = []
+        for order_id, order in self.active_limit_orders.items():
+            if order.vt_symbol in self.bars:
+                price = order.price or self.bars[order.vt_symbol].close_price
+                amount = order.volume * price
+                
+                # 确定交易方向
+                if order.direction == Direction.LONG:
+                    direction = "买入"
+                else:
+                    direction = "卖出"
+                    
+                pending_orders_info.append(f"{direction}:{order.vt_symbol}({round(amount, 2)})")
+            else:
+                # 确定交易方向
+                if order.direction == Direction.LONG:
+                    direction = "买入"
+                else:
+                    direction = "卖出"
+                    
+                pending_orders_info.append(f"{direction}:{order.vt_symbol}")
+        
+        # 计算持仓总额
+        total_position = sum(current_positions.values()) if current_positions else 0
+        
+        logger.info(f"当前持仓金额: {current_positions}")
+        # 总资产 = 可用现金 + 股票持仓市值
+        total_assets = self.cash + total_position if (self.cash + total_position) > 0 else 0
+        position_ratio = round(total_position / total_assets * 100, 2) if total_assets > 0 else 'N/A'
+        
+        logger.info(f"当日持仓总额: {round(total_position, 2)}, 总资产: {round(total_assets, 2)}, 仓位占比: {position_ratio}%")
+        logger.info(f"调仓列表: {pending_orders_info}")
+        
         logger.info("调用策略的on_bars方法")
         self.strategy.on_bars(bars)
+        
+        # 处理策略生成的新订单
+        self.cross_order()
 
         self.update_daily_close(self.bars, dt)
 

@@ -100,6 +100,9 @@ class LanceBreitsteinStrategy(AlphaStrategy):
             if not self.check_multi_timeframe_resonance(vt_symbol):
                 continue
             candidates.append(vt_symbol)
+        
+        # 添加调试日志，显示候选标的数量
+        self.write_log(f"符合条件的候选标的数量: {len(candidates)}")
 
         # ② 卖出逻辑 - 根据选择的模式执行
         current_positions = {sym: pos for sym, pos in self.pos_data.items() if pos > 0}
@@ -149,8 +152,29 @@ class LanceBreitsteinStrategy(AlphaStrategy):
             return
 
         # ③ 计算每个标的目标仓位
-        portfolio_value = self.get_portfolio_value()
-        target_value_per = portfolio_value * self.position_size / len(candidates)
+        # 正确逻辑：position_size = 0.1 表示 每个标的最多占总资金的10%，而非所有标的平分
+        
+        # 可用现金
+        available_cash = self.get_cash_available()
+        
+        # 计算当前已持仓金额
+        current_holding_value = sum(
+            pos * bars[symbol].close_price 
+            for symbol, pos in current_positions.items() 
+            if symbol in bars and pos > 0
+        )
+        
+        # 总资金 = 可用现金 + 当前持仓金额
+        total_capital = available_cash + current_holding_value
+        
+        # 每个标的的最大仓位金额 = 总资金 × position_size（每个标的独立计算）
+        max_position_value_per_symbol = total_capital * self.position_size
+        
+        self.write_log(f"资金状态: 总资金={total_capital:.2f}, 可用现金={available_cash:.2f}, 当前持仓={current_holding_value:.2f}")
+        self.write_log(f"每个标的最大仓位金额: {max_position_value_per_symbol:.2f} (总资金 × {self.position_size*100:.0f}%)")
+        
+        # 计算可开新仓的候选标的（未持仓的）
+        new_candidates = [sym for sym in candidates if sym not in current_positions]
 
         for vt_symbol in candidates:
             bar = bars[vt_symbol]
@@ -158,22 +182,35 @@ class LanceBreitsteinStrategy(AlphaStrategy):
             if price <= 0:
                 continue
 
-            target_pos = target_value_per / price
             current_pos = current_positions.get(vt_symbol, 0)
 
-            # 已持仓：维持（不额外加仓，等回踩）
+            # 已持仓：检查是否需要调整
             if current_pos > 0:
-                if abs(target_pos - current_pos) > 0.01:
+                current_value = current_pos * price
+                
+                # 如果当前持仓金额超过单标的上限，减少仓位
+                if current_value > max_position_value_per_symbol * 1.1:  # 10%容差
+                    target_pos = max_position_value_per_symbol / price
+                    self.write_log(f"{vt_symbol} 当前持仓 {current_value:.2f} 超过上限，调整至 {max_position_value_per_symbol:.2f}")
                     self.set_target(vt_symbol, target_pos)
                 continue
 
             # 未持仓：只有回踩支撑才开新仓
-            if self.check_entry_condition(vt_symbol, bar):
-                self.write_log(f"{vt_symbol} 触发回踩入场，目标仓位 {target_pos:.2f}")
+            if vt_symbol in new_candidates and self.check_entry_condition(vt_symbol, bar):
+                # 检查可用现金是否足够
+                if available_cash < max_position_value_per_symbol:
+                    self.write_log(f"{vt_symbol} 可用现金不足 ({available_cash:.2f} < {max_position_value_per_symbol:.2f})，跳过开仓")
+                    continue
+                    
+                # 计算目标仓位（不超过单标的上限）
+                target_pos = max_position_value_per_symbol / price
+                self.write_log(f"{vt_symbol} 触发回踩入场，目标仓位 {target_pos:.2f} (约 {max_position_value_per_symbol:.2f} 元)")
                 self.set_target(vt_symbol, target_pos)
                 # 记录入场价格
                 self.entry_prices[vt_symbol] = price
                 self.write_log(f"{vt_symbol} 记录入场价格: {price}")
+                # 更新可用现金（预扣）
+                available_cash -= max_position_value_per_symbol
             else:
                 self.write_log(f"{vt_symbol} 满足趋势条件，等待回踩支撑")
 
