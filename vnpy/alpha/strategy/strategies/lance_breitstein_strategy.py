@@ -29,6 +29,11 @@ class LanceBreitsteinStrategy(AlphaStrategy):
     swing_window: int = 5         # 识别摆动高低点的窗口（左右各N根K线）
     pullback_tolerance: float = 0.03  # 回踩支撑位的容差（3%以内算"接近支撑"）
     position_size: float = 0.1   # 每个标的的最大仓位占总资金比例
+    
+    # 止盈止损参数
+    exit_mode: str = "condition"  # 卖出模式："condition"(条件模式) 或 "fixed_ratio"(固定比例模式)
+    take_profit_ratio: float = 3.5  # 止盈比例 (3.5R)
+    stop_loss_ratio: float = 1.0    # 止损比例 (1R)
 
     def __init__(self, engine, strategy_name, vt_symbols, setting):
         super().__init__(engine, strategy_name, vt_symbols, setting)
@@ -42,6 +47,10 @@ class LanceBreitsteinStrategy(AlphaStrategy):
         self.weekly_bars: Dict[str, deque] = {s: deque(maxlen=30) for s in vt_symbols}
         self.daily_bars: Dict[str, deque] = {s: deque(maxlen=120) for s in vt_symbols}
         self.minute_bars: Dict[str, deque] = {s: deque(maxlen=1440) for s in vt_symbols}
+        
+        # 持仓记录（用于止盈止损计算）
+        self.entry_prices: Dict[str, float] = {}  # 标的 -> 入场价格
+        self.position_size: float = 0.1  # 确保position_size被正确初始化
 
     # ------------------------------------------------------------------
     # 生命周期回调
@@ -93,12 +102,41 @@ class LanceBreitsteinStrategy(AlphaStrategy):
                 continue
             candidates.append(vt_symbol)
 
-        # ② 清仓不再满足条件的持仓
+        # ② 卖出逻辑 - 根据选择的模式执行
         current_positions = {sym: pos for sym, pos in self.pos_data.items() if pos > 0}
         for vt_symbol in current_positions:
-            if vt_symbol not in candidates:
-                self.write_log(f"{vt_symbol} 不再满足条件，清仓")
-                self.set_target(vt_symbol, 0)
+            bar = bars.get(vt_symbol)
+            if not bar:
+                continue
+                
+            if self.exit_mode == "condition":
+                # 条件模式：清仓不再满足条件的持仓
+                if vt_symbol not in candidates:
+                    self.write_log(f"{vt_symbol} 不再满足条件，清仓")
+                    self.set_target(vt_symbol, 0)
+                    # 清除入场价格记录
+                    if vt_symbol in self.entry_prices:
+                        del self.entry_prices[vt_symbol]
+            
+            elif self.exit_mode == "fixed_ratio":
+                # 固定比例模式：止盈止损
+                if vt_symbol in self.entry_prices:
+                    entry_price = self.entry_prices[vt_symbol]
+                    current_price = bar.close_price
+                    
+                    # 计算涨跌幅
+                    price_change = (current_price - entry_price) / entry_price
+                    
+                    # 止盈：达到或超过3.5R
+                    if price_change >= self.take_profit_ratio:
+                        self.write_log(f"{vt_symbol} 止盈卖出：入场价 {entry_price}, 当前价 {current_price}, 涨幅 {price_change:.2%}")
+                        self.set_target(vt_symbol, 0)
+                        del self.entry_prices[vt_symbol]
+                    # 止损：达到或低于-1R
+                    elif price_change <= -self.stop_loss_ratio:
+                        self.write_log(f"{vt_symbol} 止损卖出：入场价 {entry_price}, 当前价 {current_price}, 跌幅 {abs(price_change):.2%}")
+                        self.set_target(vt_symbol, 0)
+                        del self.entry_prices[vt_symbol]
 
         if not candidates:
             self.write_log("无符合条件的候选标的")
@@ -128,6 +166,9 @@ class LanceBreitsteinStrategy(AlphaStrategy):
             if self.check_entry_condition(vt_symbol, bar):
                 self.write_log(f"{vt_symbol} 触发回踩入场，目标仓位 {target_pos:.2f}")
                 self.set_target(vt_symbol, target_pos)
+                # 记录入场价格
+                self.entry_prices[vt_symbol] = price
+                self.write_log(f"{vt_symbol} 记录入场价格: {price}")
             else:
                 self.write_log(f"{vt_symbol} 满足趋势条件，等待回踩支撑")
 

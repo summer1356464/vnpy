@@ -144,6 +144,9 @@ def main():
     )
     
     # 添加策略（参数与 LanceBreitsteinStrategy 新实现保持一致）
+    # 选择卖出模式："condition"(传统条件模式) 或 "fixed_ratio"(固定比例止盈止损模式)
+    exit_mode = "fixed_ratio"  # 默认使用固定比例模式
+    
     strategy_setting = {
         "lookback_days": 120,
         "vwap_days": 20,
@@ -153,7 +156,10 @@ def main():
         "trendline_points": 3,  # 3个摆动低点构建趋势线
         "swing_window": 5,      # 摆动点识别窗口
         "pullback_tolerance": 0.03,  # 回踩容差 3%
-        "position_size": 0.1   # 每个标的最多占总资金 10%
+        "position_size": 0.1,   # 每个标的最多占总资金 10%
+        "exit_mode": exit_mode,  # 卖出模式
+        "take_profit_ratio": 3.5,  # 止盈比例 (3.5R)
+        "stop_loss_ratio": 1.0    # 止损比例 (1R)
     }
     
     # 创建空的信号DataFrame
