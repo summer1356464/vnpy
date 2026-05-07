@@ -158,8 +158,8 @@ def main():
         "pullback_tolerance": 0.03,  # 回踩容差 3%
         "position_size": 0.1,   # 每个标的最多占总资金 10%
         "exit_mode": exit_mode,  # 卖出模式
-        "take_profit_ratio": 3.5,  # 止盈比例 (3.5R)
-        "stop_loss_ratio": 1.0    # 止损比例 (1R)
+        "take_profit_ratio": 350,  # 止盈比例 (3.5R)
+        "stop_loss_ratio": 15    # 止损比例 (1R)
     }
     
     # 创建空的信号DataFrame

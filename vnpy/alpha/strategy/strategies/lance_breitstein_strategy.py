@@ -50,7 +50,6 @@ class LanceBreitsteinStrategy(AlphaStrategy):
         
         # 持仓记录（用于止盈止损计算）
         self.entry_prices: Dict[str, float] = {}  # 标的 -> 入场价格
-        self.position_size: float = 0.1  # 确保position_size被正确初始化
 
     # ------------------------------------------------------------------
     # 生命周期回调
@@ -127,16 +126,22 @@ class LanceBreitsteinStrategy(AlphaStrategy):
                     # 计算涨跌幅
                     price_change = (current_price - entry_price) / entry_price
                     
-                    # 止盈：达到或超过3.5R
-                    if price_change >= self.take_profit_ratio:
+                    # 止盈：达到或超过3.5%（3.5R）
+                    if price_change >= self.take_profit_ratio / 100:
                         self.write_log(f"{vt_symbol} 止盈卖出：入场价 {entry_price}, 当前价 {current_price}, 涨幅 {price_change:.2%}")
                         self.set_target(vt_symbol, 0)
                         del self.entry_prices[vt_symbol]
-                    # 止损：达到或低于-1R
-                    elif price_change <= -self.stop_loss_ratio:
+                    # 止损：达到或低于-1%（-1R）
+                    elif price_change <= -self.stop_loss_ratio / 100:
                         self.write_log(f"{vt_symbol} 止损卖出：入场价 {entry_price}, 当前价 {current_price}, 跌幅 {abs(price_change):.2%}")
                         self.set_target(vt_symbol, 0)
                         del self.entry_prices[vt_symbol]
+                else:
+                    # 无入场价格记录时，使用条件模式退出
+                    self.write_log(f"{vt_symbol} 无入场价格记录，使用条件模式退出")
+                    if vt_symbol not in candidates:
+                        self.write_log(f"{vt_symbol} 不再满足条件，清仓")
+                        self.set_target(vt_symbol, 0)
 
         if not candidates:
             self.write_log("无符合条件的候选标的")
