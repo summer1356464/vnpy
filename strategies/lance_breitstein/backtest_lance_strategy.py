@@ -42,8 +42,23 @@ async def download_data(datafeed, lab, vt_symbols, interval, start, end, lookbac
     for vt_symbol in vt_symbols:
         # 先检查AlphaLab中是否已有足够的数据（包含回溯窗口）
         existing_bars = lab.load_bar_data(vt_symbol, interval, actual_start, end)
+        
+        # 检查缓存数据是否完全覆盖请求的时间范围
+        need_download = True
         if existing_bars and len(existing_bars) > 0:
-            print(f"✓ {vt_symbol} 在AlphaLab中已有数据 ({len(existing_bars)}条)，跳过下载")
+            # 获取缓存数据的实际时间范围
+            bar_dates = [b.datetime for b in existing_bars]
+            cache_start = min(bar_dates)
+            cache_end = max(bar_dates)
+            
+            # 检查缓存是否完全覆盖请求范围
+            if cache_start <= actual_start and cache_end >= end:
+                print(f"✓ {vt_symbol} 在AlphaLab中已有完整数据 ({len(existing_bars)}条，{cache_start.date()}至{cache_end.date()})，跳过下载")
+                need_download = False
+            else:
+                print(f"⚠ {vt_symbol} 缓存数据不完整 (缓存: {cache_start.date()}至{cache_end.date()}, 需要: {actual_start.date()}至{end.date()})，重新下载")
+        
+        if not need_download:
             continue
         
         symbol, exchange = extract_vt_symbol(vt_symbol)
@@ -136,7 +151,7 @@ def main():
     vt_symbols = hs300_stocks  # 使用已经下载数据的所有沪深300成分股进行回测
     interval = Interval.DAILY
     # 调整回测时间为2024-2025年
-    start = datetime(2024, 1, 1)
+    start = datetime(2022, 1, 1)
     end = datetime(2025, 12, 31)
     capital = 1000000  # 初始资金100万
     

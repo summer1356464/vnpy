@@ -111,7 +111,9 @@ class BacktestingEngine:
 
     def load_data(self) -> None:
         """Load historical data"""
-        logger.info("开始加载历史数据")
+        logger.info(f"========== 开始加载历史数据 ==========")
+        logger.info(f"回测时间范围设置：{self.start} 至 {self.end}")
+        logger.info(f"需要加载的标的数量：{len(self.vt_symbols)}")
 
         if not self.end:
             self.end = datetime.now()
@@ -126,6 +128,7 @@ class BacktestingEngine:
 
         # Load historical data for each symbol
         empty_symbols: list[str] = []
+        total_bars = 0
         for vt_symbol in tqdm(self.vt_symbols, total=len(self.vt_symbols)):
             data: list[BarData] = self.lab.load_bar_data(
                 vt_symbol,
@@ -137,6 +140,7 @@ class BacktestingEngine:
             for bar in data:
                 self.dts.add(bar.datetime)
                 self.history_data[(bar.datetime, vt_symbol)] = bar
+                total_bars += 1
 
             data_count = len(data)
             if not data_count:
@@ -145,7 +149,15 @@ class BacktestingEngine:
         if empty_symbols:
             logger.info(f"部分合约历史数据为空：{empty_symbols}")
 
-        logger.info("所有历史数据加载完成")
+        # 打印时间范围统计
+        if self.dts:
+            earliest_dt = min(self.dts)
+            latest_dt = max(self.dts)
+            logger.info(f"实际加载的时间范围：{earliest_dt} 至 {latest_dt}")
+            logger.info(f"时间点数量：{len(self.dts)}")
+            logger.info(f"K线总数：{total_bars}")
+
+        logger.info(f"========== 所有历史数据加载完成 ==========")
 
     def run_backtesting(self) -> None:
         """Start backtesting"""
