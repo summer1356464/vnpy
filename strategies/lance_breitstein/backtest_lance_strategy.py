@@ -25,26 +25,35 @@ SETTINGS["datafeed.use_cache"] = True
 SETTINGS["datafeed.cache_path"] = "./data_cache"  # 设置缓存目录
 
 
-async def download_data(datafeed, lab, vt_symbols, interval, start, end):
-    """异步下载数据"""
-    print("\n开始检查并下载历史数据...")
+async def download_data(datafeed, lab, vt_symbols, interval, start, end, lookback_days: int = 120):
+    """
+    异步下载数据
+    :param lookback_days: 回溯窗口天数，用于计算指标需要的额外历史数据
+    """
+    # 计算实际的下载开始日期（向前推lookback_days天，用于计算指标）
+    from datetime import timedelta
+    actual_start = start - timedelta(days=lookback_days)
+    
+    print(f"\n开始检查并下载历史数据...")
+    print(f"  回测时间范围: {start.date()} 至 {end.date()}")
+    print(f"  下载时间范围: {actual_start.date()} 至 {end.date()} (包含{lookback_days}天回溯窗口)")
     
     # 下载标的数据
     for vt_symbol in vt_symbols:
-        # 先检查AlphaLab中是否已有数据
-        existing_bars = lab.load_bar_data(vt_symbol, interval, start, end)
+        # 先检查AlphaLab中是否已有足够的数据（包含回溯窗口）
+        existing_bars = lab.load_bar_data(vt_symbol, interval, actual_start, end)
         if existing_bars and len(existing_bars) > 0:
             print(f"✓ {vt_symbol} 在AlphaLab中已有数据 ({len(existing_bars)}条)，跳过下载")
             continue
         
         symbol, exchange = extract_vt_symbol(vt_symbol)
         
-        # 创建历史数据请求
+        # 创建历史数据请求（使用包含回溯窗口的开始日期）
         req = HistoryRequest(
             symbol=symbol,
             exchange=exchange,
             interval=interval,
-            start=start,
+            start=actual_start,
             end=end
         )
         
@@ -60,20 +69,20 @@ async def download_data(datafeed, lab, vt_symbols, interval, start, end):
     
     # 下载沪深300指数数据用于基准对比
     hs300_symbol = "000300.SSE"
-    # 先检查AlphaLab中是否已有数据
-    existing_hs300_bars = lab.load_bar_data(hs300_symbol, interval, start, end)
+    # 先检查AlphaLab中是否已有数据（包含回溯窗口）
+    existing_hs300_bars = lab.load_bar_data(hs300_symbol, interval, actual_start, end)
     if existing_hs300_bars and len(existing_hs300_bars) > 0:
         print(f"✓ 沪深300指数在AlphaLab中已有数据 ({len(existing_hs300_bars)}条)，跳过下载")
     else:
         print("\n下载沪深300指数数据用于基准对比...")
         hs300_symbol_clean, hs300_exchange = extract_vt_symbol(hs300_symbol)
         
-        # 创建历史数据请求
+        # 创建历史数据请求（使用包含回溯窗口的开始日期）
         hs300_req = HistoryRequest(
             symbol=hs300_symbol_clean,
             exchange=hs300_exchange,
             interval=interval,
-            start=start,
+            start=actual_start,
             end=end
         )
         
@@ -131,10 +140,6 @@ def main():
     end = datetime(2025, 12, 31)
     capital = 1000000  # 初始资金100万
     
-    # 异步下载全量沪深300成分股数据
-    print(f"\n开始下载全量 {len(vt_symbols)} 只沪深300成分股数据...")
-    asyncio.run(download_data(datafeed, lab, vt_symbols, interval, start, end))
-    
     engine.set_parameters(
         vt_symbols=vt_symbols,  # 使用全量沪深300成分股
         interval=interval,
@@ -147,12 +152,20 @@ def main():
     # 选择卖出模式："condition"(传统条件模式) 或 "fixed_ratio"(固定比例止盈止损模式)
     exit_mode = "fixed_ratio"  # 默认使用固定比例模式
     
+    # 策略参数（先定义，用于数据下载的回溯窗口计算）
+    lookback_days = 120
+    vwap_days = 20
+    long_ma = 50
+    
+    # 计算需要的最大回溯窗口（确保所有指标都能计算）
+    max_lookback = max(lookback_days, vwap_days, long_ma * 2)
+    
     strategy_setting = {
-        "lookback_days": 120,
-        "vwap_days": 20,
+        "lookback_days": lookback_days,
+        "vwap_days": vwap_days,
         "short_ma": 10,
         "medium_ma": 20,   # MA20 —— Lance 常用回踩支撑位
-        "long_ma": 50,    # MA50 —— Lance 常用趋势基准
+        "long_ma": long_ma,    # MA50 —— Lance 常用趋势基准
         "trendline_points": 3,  # 3个摆动低点构建趋势线
         "swing_window": 5,      # 摆动点识别窗口
         "pullback_tolerance": 0.03,  # 回踩容差 3%
@@ -161,6 +174,10 @@ def main():
         "take_profit_ratio": 45,  # 止盈比例 (3.5R)
         "stop_loss_ratio": 15    # 止损比例 (1R)
     }
+    
+    # 异步下载全量沪深300成分股数据（包含回溯窗口）
+    print(f"\n开始下载全量 {len(vt_symbols)} 只沪深300成分股数据...")
+    asyncio.run(download_data(datafeed, lab, vt_symbols, interval, start, end, max_lookback))
     
     # 创建空的信号DataFrame
     import polars as pl
