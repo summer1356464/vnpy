@@ -389,6 +389,9 @@ def main():
         # 只显示前3个标的的K线图作为示例
         sample_symbols = top_10[:3] + bottom_10[:3] + mid_10[:3]
         
+        # 获取当前测试时间
+        test_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
         html_content = f"""
         <!DOCTYPE html>
         <html lang="zh-CN">
@@ -417,6 +420,7 @@ def main():
                 <h2>策略整体统计</h2>
                 <table>
                     <tr><th>指标</th><th>数值</th></tr>
+                    <tr><td>测试时间</td><td>{test_time}</td></tr>
                     <tr><td>总交易次数</td><td>{total_trade_count}</td></tr>
                     <tr><td>盈利交易次数</td><td>{len(winning_trades)}</td></tr>
                     <tr><td>胜率</td><td>{overall_win_rate:.2f}%</td></tr>
