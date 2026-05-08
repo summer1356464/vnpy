@@ -1,6 +1,8 @@
 from typing import List, Optional
 from datetime import datetime
 import os
+import tempfile
+import fcntl
 import pandas as pd
 from pathlib import Path
 
@@ -65,6 +67,86 @@ class ParquetCacheBackend(BaseCacheBackend[T]):
             file_name = f"{data_type}.parquet"
         
         return data_dir / file_name
+    
+    def _get_lock_path(self, file_path: Path) -> Path:
+        """
+        Get lock file path for a given data file.
+        """
+        return file_path.parent / (file_path.name + ".lock")
+    
+    def _atomic_write_with_lock(self, df: pd.DataFrame, file_path: Path) -> bool:
+        """
+        Atomic write DataFrame to parquet with file lock protection.
+        
+        This method:
+        1. Acquires an exclusive file lock
+        2. Reads existing data if file exists
+        3. Merges data and removes duplicates
+        4. Writes to a temporary file
+        5. Renames temp file to target (atomic operation on Unix)
+        6. Releases the lock
+        
+        Returns True on success, False on failure.
+        """
+        lock_path = self._get_lock_path(file_path)
+        temp_path = None  # 初始化，避免异常处理中的作用域问题
+        
+        try:
+            # Acquire exclusive lock
+            with open(lock_path, "w") as lock_file:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                except AttributeError:
+                    # fcntl not available (Windows), skip locking
+                    pass
+                
+                try:
+                    # Read existing data if file exists
+                    if file_path.exists():
+                        existing_df = pd.read_parquet(file_path)
+                        combined_df = pd.concat([existing_df, df], ignore_index=True)
+                        combined_df = combined_df.drop_duplicates(subset=["datetime"])
+                        combined_df = combined_df.sort_values(by=["datetime"])
+                    else:
+                        combined_df = df
+                    
+                    # Ensure parent directory exists
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    # Atomic write: write to temp file first, then rename
+                    fd, temp_path = tempfile.mkstemp(
+                        suffix=".parquet.tmp",
+                        dir=str(file_path.parent)
+                    )
+                    try:
+                        os.close(fd)
+                        combined_df.to_parquet(temp_path, index=False, compression="snappy")
+                        # Atomic rename (Unix guarantee)
+                        os.replace(temp_path, str(file_path))
+                        temp_path = None  # 成功后重置，避免后续清理
+                    finally:
+                        # Clean up temp file if something went wrong
+                        if temp_path is not None and os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    
+                    return True
+                
+                finally:
+                    # Release lock
+                    try:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    except AttributeError:
+                        pass
+        
+        except Exception as e:
+            print(f"Atomic write failed for {file_path}: {e}")
+            # Clean up temp file if exists
+            try:
+                if temp_path is not None and os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except:
+                pass
+            return False
     
     def _bar_to_df(self, bars: List[BarData]) -> pd.DataFrame:
         """
@@ -203,7 +285,7 @@ class ParquetCacheBackend(BaseCacheBackend[T]):
     
     def save_data(self, data: List[T]) -> bool:
         """
-        Save data to parquet cache files (one file per symbol).
+        Save data to parquet cache files (one file per symbol) with concurrent write protection.
         """
         if not data:
             return False
@@ -216,16 +298,8 @@ class ParquetCacheBackend(BaseCacheBackend[T]):
                 file_path = self._get_file_path(data[0].symbol, data[0].exchange, data_type, interval)
                 df = self._bar_to_df(data)
                 
-                # Append if file exists, otherwise create new
-                if file_path.exists():
-                    existing_df = pd.read_parquet(file_path)
-                    combined_df = pd.concat([existing_df, df], ignore_index=True)
-                    # Remove duplicates and sort by datetime
-                    combined_df = combined_df.drop_duplicates(subset=["datetime"])
-                    combined_df = combined_df.sort_values(by=["datetime"])
-                    combined_df.to_parquet(file_path, index=False, compression="snappy")
-                else:
-                    df.to_parquet(file_path, index=False, compression="snappy")
+                # Use atomic write with lock protection
+                return self._atomic_write_with_lock(df, file_path)
                         
             elif isinstance(data[0], TickData):
                 # Tick data - one file per symbol
@@ -233,16 +307,8 @@ class ParquetCacheBackend(BaseCacheBackend[T]):
                 file_path = self._get_file_path(data[0].symbol, data[0].exchange, data_type)
                 df = self._tick_to_df(data)
                 
-                # Append if file exists, otherwise create new
-                if file_path.exists():
-                    existing_df = pd.read_parquet(file_path)
-                    combined_df = pd.concat([existing_df, df], ignore_index=True)
-                    # Remove duplicates and sort by datetime
-                    combined_df = combined_df.drop_duplicates(subset=["datetime"])
-                    combined_df = combined_df.sort_values(by=["datetime"])
-                    combined_df.to_parquet(file_path, index=False, compression="snappy")
-                else:
-                    df.to_parquet(file_path, index=False, compression="snappy")
+                # Use atomic write with lock protection
+                return self._atomic_write_with_lock(df, file_path)
                         
             return True
         except Exception as e:
