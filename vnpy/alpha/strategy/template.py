@@ -157,11 +157,12 @@ class AlphaStrategy(metaclass=ABCMeta):
                 order_price = bar.close_price
                 self.write_log(f"Invalid price_type: {price_type}, using close price instead")
 
-            # Add price adjustment
-            order_price += price_add
 
             # Long position
             if diff > 0:
+                # Calculate long order price
+                order_price: float = bar.close_price * (1 + price_add)
+
                 # Calculate cover and buy volumes
                 cover_volume: float = 0
                 buy_volume: float = 0
@@ -180,6 +181,9 @@ class AlphaStrategy(metaclass=ABCMeta):
                     self.buy(vt_symbol, order_price, buy_volume)
             # Short position
             elif diff < 0:
+                # Calculate short order price
+                order_price = bar.close_price * (1 - price_add)
+
                 # Calculate sell and short volumes
                 sell_volume: float = 0
                 short_volume: float = 0
