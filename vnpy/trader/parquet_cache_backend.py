@@ -15,10 +15,10 @@ class ParquetCacheBackend(BaseCacheBackend[T]):
     Stores data in parquet format with a directory structure like:
     cache_root/
         symbol_exchange/
-            bar/interval/
-                YYYY-MM-DD.parquet
+            bar/
+                interval.parquet  # 一个标的一个文件，包含所有日期数据
             tick/
-                YYYY-MM-DD.parquet
+                tick.parquet      # 一个标的一个文件，包含所有日期数据
     """
     
     def __init__(self, cache_root: str = "./data_cache"):
@@ -47,21 +47,23 @@ class ParquetCacheBackend(BaseCacheBackend[T]):
     
     def _get_data_dir(self, symbol: str, exchange: Exchange, data_type: str, interval: Optional[Interval] = None) -> Path:
         """
-        Get directory path for specific data type and interval.
+        Get directory path for specific data type.
         """
         symbol_dir = self._get_symbol_dir(symbol, exchange)
-        if data_type == "bar":
-            return symbol_dir / "bar" / interval.value if interval else symbol_dir / "bar"
-        else:  # tick
-            return symbol_dir / "tick"
+        return symbol_dir / data_type
     
-    def _get_file_path(self, symbol: str, exchange: Exchange, data_type: str, date: datetime, interval: Optional[Interval] = None) -> Path:
+    def _get_file_path(self, symbol: str, exchange: Exchange, data_type: str, interval: Optional[Interval] = None) -> Path:
         """
-        Get parquet file path for specific date.
+        Get parquet file path for a symbol (one file per symbol).
         """
         data_dir = self._get_data_dir(symbol, exchange, data_type, interval)
         data_dir.mkdir(exist_ok=True, parents=True)
-        file_name = f"{date.strftime('%Y-%m-%d')}.parquet"
+        
+        if data_type == "bar" and interval:
+            file_name = f"{interval.value}.parquet"
+        else:
+            file_name = f"{data_type}.parquet"
+        
         return data_dir / file_name
     
     def _bar_to_df(self, bars: List[BarData]) -> pd.DataFrame:
@@ -162,7 +164,7 @@ class ParquetCacheBackend(BaseCacheBackend[T]):
     
     def load_data(self, req: HistoryRequest) -> List[T]:
         """
-        Load data from parquet cache files.
+        Load data from parquet cache files (one file per symbol).
         """
         symbol = req.symbol
         exchange = req.exchange
@@ -173,100 +175,74 @@ class ParquetCacheBackend(BaseCacheBackend[T]):
             # Bar data
             data_type = "bar"
             interval = req.interval
-            data_dir = self._get_data_dir(symbol, exchange, data_type, interval)
         else:
             # Tick data
             data_type = "tick"
             interval = None
-            data_dir = self._get_data_dir(symbol, exchange, data_type)
         
-        if not data_dir.exists():
+        # Get file path (one file per symbol)
+        file_path = self._get_file_path(symbol, exchange, data_type, interval)
+        
+        if not file_path.exists():
             return []
         
-        # Find all parquet files in date range
-        files = []
-        current_date = start.date()
-        end_date = end.date()
+        # Read single parquet file for this symbol
+        df = pd.read_parquet(file_path)
         
-        while current_date <= end_date:
-            file_path = self._get_file_path(symbol, exchange, data_type, current_date, interval)
-            if file_path.exists():
-                files.append(file_path)
-            current_date += pd.Timedelta(days=1)
-        
-        if not files:
+        if df.empty:
             return []
-        
-        # Read and concatenate all files
-        dfs = []
-        for file_path in files:
-            df = pd.read_parquet(file_path)
-            dfs.append(df)
-        
-        if not dfs:
-            return []
-        
-        combined_df = pd.concat(dfs, ignore_index=True)
         
         # Filter by datetime range
-        combined_df = combined_df[(combined_df["datetime"] >= start) & (combined_df["datetime"] <= end)]
+        df = df[(df["datetime"] >= start) & (df["datetime"] <= end)]
         
         # Convert back to data objects
         if data_type == "bar":
-            return self._df_to_bar(combined_df)
+            return self._df_to_bar(df)
         else:
-            return self._df_to_tick(combined_df)
+            return self._df_to_tick(df)
     
     def save_data(self, data: List[T]) -> bool:
         """
-        Save data to parquet cache files.
+        Save data to parquet cache files (one file per symbol).
         """
         if not data:
             return False
         
         try:
             if isinstance(data[0], BarData):
-                # Bar data
+                # Bar data - one file per symbol
                 data_type = "bar"
+                interval = data[0].interval
+                file_path = self._get_file_path(data[0].symbol, data[0].exchange, data_type, interval)
                 df = self._bar_to_df(data)
                 
-                # Group by date and save to separate files
-                df["date"] = df["datetime"].dt.date
-                
-                for date, date_df in df.groupby("date"):
-                    interval = data[0].interval
-                    file_path = self._get_file_path(data[0].symbol, data[0].exchange, data_type, date, interval)
-                    
-                    # Append if file exists, otherwise create new
-                    if file_path.exists():
-                        existing_df = pd.read_parquet(file_path)
-                        combined_df = pd.concat([existing_df, date_df.drop(columns=["date"])], ignore_index=True)
-                        # Remove duplicates
-                        combined_df = combined_df.drop_duplicates(subset=["datetime"])
-                        combined_df.to_parquet(file_path, index=False, compression="snappy")
-                    else:
-                        date_df.drop(columns=["date"]).to_parquet(file_path, index=False, compression="snappy")
+                # Append if file exists, otherwise create new
+                if file_path.exists():
+                    existing_df = pd.read_parquet(file_path)
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+                    # Remove duplicates and sort by datetime
+                    combined_df = combined_df.drop_duplicates(subset=["datetime"])
+                    combined_df = combined_df.sort_values(by=["datetime"])
+                    combined_df.to_parquet(file_path, index=False, compression="snappy")
+                else:
+                    df.to_parquet(file_path, index=False, compression="snappy")
                         
             elif isinstance(data[0], TickData):
-                # Tick data
+                # Tick data - one file per symbol
                 data_type = "tick"
+                file_path = self._get_file_path(data[0].symbol, data[0].exchange, data_type)
                 df = self._tick_to_df(data)
                 
-                # Group by date and save to separate files
-                df["date"] = df["datetime"].dt.date
-                
-                for date, date_df in df.groupby("date"):
-                    file_path = self._get_file_path(data[0].symbol, data[0].exchange, data_type, date)
-                    
-                    # Append if file exists, otherwise create new
-                    if file_path.exists():
-                        existing_df = pd.read_parquet(file_path)
-                        combined_df = pd.concat([existing_df, date_df.drop(columns=["date"])], ignore_index=True)
-                        # Remove duplicates
-                        combined_df = combined_df.drop_duplicates(subset=["datetime"])
-                        combined_df.to_parquet(file_path, index=False, compression="snappy")
-                    else:
-                        date_df.drop(columns=["date"]).to_parquet(file_path, index=False, compression="snappy")
+                # Append if file exists, otherwise create new
+                if file_path.exists():
+                    existing_df = pd.read_parquet(file_path)
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+                    # Remove duplicates and sort by datetime
+                    combined_df = combined_df.drop_duplicates(subset=["datetime"])
+                    combined_df = combined_df.sort_values(by=["datetime"])
+                    combined_df.to_parquet(file_path, index=False, compression="snappy")
+                else:
+                    df.to_parquet(file_path, index=False, compression="snappy")
                         
             return True
         except Exception as e:
