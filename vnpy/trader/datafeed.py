@@ -39,6 +39,12 @@ datafeed: BaseDatafeed | None = None
 def get_datafeed() -> BaseDatafeed:
     """
     Get the global datafeed instance.
+    
+    Note: 
+    - When use_cache is False, returns the raw TX datafeed directly
+    - When use_cache is True, wraps with ParquetCacheBackend
+    - For backtesting with AlphaLab, it's recommended to set use_cache=False
+      and let AlphaLab handle data storage via its own cache system
     """
     global datafeed
     if datafeed:
@@ -46,7 +52,7 @@ def get_datafeed() -> BaseDatafeed:
 
     # Read datafeed related global setting
     datafeed_name: str = SETTINGS["datafeed.name"]
-    use_cache: bool = SETTINGS.get("datafeed.use_cache", True)
+    use_cache: bool = SETTINGS.get("datafeed.use_cache", False)  # 默认关闭缓存
 
     # Create base datafeed
     base_datafeed = BaseDatafeed()
@@ -67,7 +73,7 @@ def get_datafeed() -> BaseDatafeed:
         except ModuleNotFoundError:
             print(_("无法加载数据服务模块，请运行 pip install {} 尝试安装").format(module_name))
     
-    # Wrap with cache if enabled, regardless of whether datafeed is base or custom
+    # Wrap with cache if enabled
     if use_cache:
         try:
             # Import inside function to avoid circular import
@@ -85,6 +91,9 @@ def get_datafeed() -> BaseDatafeed:
             datafeed = base_datafeed
             print(_("数据缓存模块导入失败，将使用原始数据源"))
     else:
+        # Directly use TX datafeed without cache wrapper
+        # Data will be stored in AlphaLab's native cache format
         datafeed = base_datafeed
+        print(_("使用原始数据源（未启用缓存包装）"))
 
     return datafeed

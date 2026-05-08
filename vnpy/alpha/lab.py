@@ -79,10 +79,36 @@ class AlphaLab:
             data.append(bar_data)
 
         new_df: pl.DataFrame = pl.DataFrame(data)
+        
+        # Ensure datetime column has nanosecond precision for consistency
+        new_df = new_df.with_columns(pl.col("datetime").cast(pl.Datetime(time_unit="ns")))
+        
+        # Ensure numeric columns have consistent types (Float64 for all to avoid type mismatch)
+        new_df = new_df.with_columns(
+            pl.col("open").cast(pl.Float64),
+            pl.col("high").cast(pl.Float64),
+            pl.col("low").cast(pl.Float64),
+            pl.col("close").cast(pl.Float64),
+            pl.col("volume").cast(pl.Float64),
+            pl.col("turnover").cast(pl.Float64),
+            pl.col("open_interest").cast(pl.Float64)
+        )
 
         # If file exists, read and merge
         if file_path.exists():
             old_df: pl.DataFrame = pl.read_parquet(file_path)
+            
+            # Ensure old_df has the same schema as new_df
+            old_df = old_df.with_columns(
+                pl.col("datetime").cast(pl.Datetime(time_unit="ns")),
+                pl.col("open").cast(pl.Float64),
+                pl.col("high").cast(pl.Float64),
+                pl.col("low").cast(pl.Float64),
+                pl.col("close").cast(pl.Float64),
+                pl.col("volume").cast(pl.Float64),
+                pl.col("turnover").cast(pl.Float64),
+                pl.col("open_interest").cast(pl.Float64)
+            )
 
             new_df = pl.concat([old_df, new_df])
 
@@ -197,15 +223,16 @@ class AlphaLab:
             # Filter by date range
             df = df.filter((pl.col("datetime") >= start) & (pl.col("datetime") <= end))
 
-            # Specify data types
+            # Ensure consistent data types (match save_bar_data format)
             df = df.with_columns(
-                pl.col("open"),
-                pl.col("high"),
-                pl.col("low"),
-                pl.col("close"),
-                pl.col("volume"),
-                pl.col("turnover"),
-                pl.col("open_interest"),
+                pl.col("datetime").cast(pl.Datetime(time_unit="ns")),
+                pl.col("open").cast(pl.Float64),
+                pl.col("high").cast(pl.Float64),
+                pl.col("low").cast(pl.Float64),
+                pl.col("close").cast(pl.Float64),
+                pl.col("volume").cast(pl.Float64),
+                pl.col("turnover").cast(pl.Float64),
+                pl.col("open_interest").cast(pl.Float64),
                 (pl.col("turnover") / pl.col("volume")).alias("vwap")
             )
 

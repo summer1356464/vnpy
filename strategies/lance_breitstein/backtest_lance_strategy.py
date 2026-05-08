@@ -19,10 +19,10 @@ from vnpy.alpha.strategy.strategies.lance_breitstein_strategy import LanceBreits
 from tools.get_hs300_constituents import get_hs300_constituents
 
 
-# 设置使用tx数据源和缓存
+# 设置使用tx数据源（不使用缓存包装，让AlphaLab处理数据存储）
 SETTINGS["datafeed.name"] = "tx"
-SETTINGS["datafeed.use_cache"] = True
-SETTINGS["datafeed.cache_path"] = "./data_cache"  # 设置缓存目录
+SETTINGS["datafeed.use_cache"] = False  # 关闭缓存包装，直接使用TX数据源
+# AlphaLab将使用其原生Parquet格式存储数据（按标的存储）
 
 
 async def download_data(datafeed, lab, vt_symbols, interval, start, end, lookback_days: int = 120):
