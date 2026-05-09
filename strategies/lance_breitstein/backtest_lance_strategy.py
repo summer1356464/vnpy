@@ -97,15 +97,23 @@ def main():
         "lookback_days": lookback_days,
         "vwap_days": vwap_days,
         "short_ma": 10,
-        "medium_ma": 20,
-        "long_ma": long_ma,
-        "trendline_points": 3,
-        "swing_window": 5,
-        "pullback_tolerance": 0.03,
-        "position_size": 0.1,
-        "exit_mode": exit_mode,
-        "take_profit_ratio": 45,
-        "stop_loss_ratio": 15
+        "medium_ma": 20,   # MA20 —— Lance 常用回踩支撑位
+        "long_ma": long_ma,    # MA50 —— Lance 常用趋势基准
+        "trendline_points": 3,  # 3个摆动低点构建趋势线
+        "swing_window": 5,      # 摆动点识别窗口
+        "pullback_tolerance": 0.03,  # 回踩容差 3%
+        "position_size": 0.1,   # 每个标的最多占总资金 10%
+        "use_macd": True,       # 使用 MACD 替代均线多头判断
+        "macd_fast": 12,        # MACD 快速均线周期
+        "macd_slow": 26,        # MACD 慢速均线周期
+        "macd_signal": 9,       # MACD 信号线周期
+        "use_multi_timeframe_macd": True,  # 使用多周期MACD共振（日线+周线+月线）
+        "weekly_macd_relaxed": True,   # 周线条件放宽
+        "monthly_macd_relaxed": True,  # 月线条件放宽
+        "allow_post_crossover": True,  # 允许金叉后趋势未破状态
+        "exit_mode": exit_mode,  # 卖出模式
+        "take_profit_ratio": 45,  # 止盈比例 (3.5R)
+        "stop_loss_ratio": 15    # 止损比例 (1R)
     }
     
     # ========== 数据获取（使用 EnhancedDataCache 统一管理）==========

@@ -20,7 +20,7 @@ class LanceBreitsteinStrategy(AlphaStrategy):
     """
 
     # 策略参数
-    lookback_days: int = 120      # 回溯天数（需足够计算所有均线）
+    lookback_days: int = 120      # 回溯天数（需足够计算所有指标）
     vwap_days: int = 20           # VWAP 计算窗口
     short_ma: int = 10            # 短期均线 (MA10)
     medium_ma: int = 20           # 中期均线 (MA20，Lance 常用支撑位)
@@ -29,6 +29,12 @@ class LanceBreitsteinStrategy(AlphaStrategy):
     swing_window: int = 5         # 识别摆动高低点的窗口（左右各N根K线）
     pullback_tolerance: float = 0.03  # 回踩支撑位的容差（3%以内算"接近支撑"）
     position_size: float = 0.1   # 每个标的的最大仓位占总资金比例
+    
+    # MACD 参数（替代均线多头判断）
+    use_macd: bool = True         # 是否使用 MACD 替代均线多头判断
+    macd_fast: int = 12           # MACD 快速均线周期
+    macd_slow: int = 26           # MACD 慢速均线周期
+    macd_signal: int = 9          # MACD 信号线周期
     
     # 止盈止损参数
     exit_mode: str = "condition"  # 卖出模式："condition"(条件模式) 或 "fixed_ratio"(固定比例模式)
@@ -58,11 +64,18 @@ class LanceBreitsteinStrategy(AlphaStrategy):
     def on_init(self):
         """策略初始化"""
         self.write_log("Lance Breitstein 策略初始化完成")
-        self.write_log(
-            f"参数: lookback={self.lookback_days}, vwap_days={self.vwap_days}, "
-            f"MA({self.short_ma}/{self.medium_ma}/{self.long_ma}), "
-            f"swing_window={self.swing_window}, pullback_tol={self.pullback_tolerance}"
-        )
+        if self.use_macd:
+            self.write_log(
+                f"参数: lookback={self.lookback_days}, vwap_days={self.vwap_days}, "
+                f"MACD({self.macd_fast}/{self.macd_slow}/{self.macd_signal}), "
+                f"swing_window={self.swing_window}, pullback_tol={self.pullback_tolerance}"
+            )
+        else:
+            self.write_log(
+                f"参数: lookback={self.lookback_days}, vwap_days={self.vwap_days}, "
+                f"MA({self.short_ma}/{self.medium_ma}/{self.long_ma}), "
+                f"swing_window={self.swing_window}, pullback_tol={self.pullback_tolerance}"
+            )
     
     def preload_lookback(self, lookback_data: Dict[str, List[BarData]]) -> None:
         """
@@ -310,10 +323,21 @@ class LanceBreitsteinStrategy(AlphaStrategy):
         return bars[-1].close_price > vwap
 
     # ------------------------------------------------------------------
-    # 条件3：多周期均线多头排列
+    # 条件3：趋势判断（MACD 或 多周期均线多头排列）
     # ------------------------------------------------------------------
 
     def check_ma_condition(self, bars: List[BarData]) -> bool:
+        """
+        趋势判断：
+        - 如果 use_macd=True：使用 MACD 金叉且多头排列判断
+        - 如果 use_macd=False：使用 MA10 > MA20 > MA50 的多头排列
+        """
+        if self.use_macd:
+            return self.check_macd_condition(bars)
+        else:
+            return self._check_ma_bull_condition(bars)
+
+    def _check_ma_bull_condition(self, bars: List[BarData]) -> bool:
         """
         检查 MA10 > MA20 > MA50 的多头排列，
         并要求 MA10 和 MA20 均处于上升斜率。
@@ -337,6 +361,98 @@ class LanceBreitsteinStrategy(AlphaStrategy):
         ma20_rising = ma20[-1] > ma20[-2] > ma20[-3]
 
         return bull_aligned and ma10_rising and ma20_rising
+
+    def check_macd_condition(self, bars: List[BarData]) -> bool:
+        """
+        MACD 多头条件判断：
+        - MACD 线在零轴上方（多头市场）
+        - MACD 线 > 信号线（金叉状态）
+        - 最近 3 期 MACD 值呈上升趋势
+        """
+        closes = [b.close_price for b in bars]
+        if len(closes) < self.macd_slow + self.macd_signal:
+            return False
+
+        # 计算 MACD
+        macd_line, signal_line, _ = self._calc_macd(closes)
+        
+        if not macd_line or not signal_line:
+            return False
+        
+        if len(macd_line) < 3:
+            return False
+
+        # MACD 线在零轴上方
+        macd_above_zero = macd_line[-1] > 0
+        # MACD 线 > 信号线（金叉）
+        macd_above_signal = macd_line[-1] > signal_line[-1]
+        # MACD 值连续上升（最近 3 期）
+        macd_rising = macd_line[-1] > macd_line[-2] > macd_line[-3]
+
+        return macd_above_zero and macd_above_signal and macd_rising
+
+    def _calc_macd(self, data: List[float]) -> Tuple[List[float], List[float], List[float]]:
+        """
+        计算 MACD 指标：
+        - MACD 线 = EMA(12) - EMA(26)
+        - 信号线 = EMA(MACD, 9)
+        - 柱状图 = MACD 线 - 信号线
+        """
+        if len(data) < self.macd_slow + self.macd_signal:
+            return [], [], []
+
+        # 计算 EMA
+        ema_fast = self._calc_ema(data, self.macd_fast)
+        ema_slow = self._calc_ema(data, self.macd_slow)
+
+        if len(ema_fast) < 1 or len(ema_slow) < 1:
+            return [], [], []
+
+        # 确保两个 EMA 长度一致
+        min_len = min(len(ema_fast), len(ema_slow))
+        if min_len < 1:
+            return [], [], []
+        
+        ema_fast = ema_fast[-min_len:]
+        ema_slow = ema_slow[-min_len:]
+
+        # MACD 线 = EMA(fast) - EMA(slow)
+        macd_line = [ema_fast[i] - ema_slow[i] for i in range(min_len)]
+
+        # 信号线 = EMA(MACD, signal_period)
+        signal_line = self._calc_ema(macd_line, self.macd_signal)
+        
+        # 确保 signal_line 与 macd_line 长度一致
+        if len(signal_line) < len(macd_line):
+            padding = [signal_line[0]] * (len(macd_line) - len(signal_line))
+            signal_line = padding + signal_line
+
+        # 柱状图 = MACD - 信号线
+        histogram = [macd_line[i] - signal_line[i] for i in range(len(macd_line))]
+
+        return macd_line, signal_line, histogram
+
+    def _calc_ema(self, data: List[float], period: int) -> List[float]:
+        """
+        计算指数移动平均线（EMA）
+        """
+        if len(data) < period:
+            return []
+
+        result = []
+        # 第一个 EMA 值 = 简单移动平均
+        first_ema = sum(data[:period]) / period
+        result.append(first_ema)
+
+        # 平滑系数
+        alpha = 2.0 / (period + 1)
+
+        # 计算后续 EMA 值
+        for i in range(period, len(data)):
+            ema = alpha * data[i] + (1 - alpha) * result[-1]
+            result.append(ema)
+
+        return result
 
     # ------------------------------------------------------------------
     # 条件4：K线趋势强度（量价配合）
