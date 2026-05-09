@@ -26,9 +26,9 @@ SETTINGS["datafeed.use_cache"] = False  # 关闭缓存包装，直接使用TX数
 # AlphaLab将使用其原生Parquet格式存储数据（按标的存储）
 
 
-async def download_data(datafeed, lab, vt_symbols, interval, start, end, lookback_days: int = 120):
+def download_data(datafeed, lab, vt_symbols, interval, start, end, lookback_days: int = 120):
     """
-    异步下载数据
+    下载数据
     :param lookback_days: 回溯窗口天数，用于计算指标需要的额外历史数据
     """
     # 计算实际的下载开始日期（向前推lookback_days天，用于计算指标）
@@ -111,9 +111,6 @@ async def download_data(datafeed, lab, vt_symbols, interval, start, end, lookbac
             lab.save_bar_data(hs300_bars)
         else:
             print(f"✗ 未获取到沪深300指数数据")
-    
-    # 等待所有异步缓存任务完成
-    await asyncio.sleep(1)
 
 def main():
     """主函数"""
@@ -191,11 +188,11 @@ def main():
         "stop_loss_ratio": 15    # 止损比例 (1R)
     }
     
-    # 异步下载全量沪深300成分股和基准指数数据（包含回溯窗口）
+    # 下载全量沪深300成分股和基准指数数据（包含回溯窗口）
     benchmark_symbol = "000300.SSE"  # 沪深300指数作为基准
     download_symbols = vt_symbols + [benchmark_symbol]  # 加入基准指数到下载列表
     print(f"\n开始下载 {len(download_symbols)} 只标的数据（含 {len(vt_symbols)} 只成分股 + 1只基准指数）...")
-    asyncio.run(download_data(datafeed, lab, download_symbols, interval, start, end, max_lookback))
+    download_data(datafeed, lab, download_symbols, interval, start, end, max_lookback)
     
     # 创建空的信号DataFrame
     import polars as pl
