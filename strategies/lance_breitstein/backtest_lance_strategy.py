@@ -18,6 +18,7 @@ from vnpy.alpha.strategy.backtesting import BacktestingEngine
 from vnpy.alpha.strategy.strategies.lance_breitstein_strategy import LanceBreitsteinStrategy
 
 from tools.get_hs300_constituents import get_hs300_constituents
+from tools.stock_name_mapping import get_stock_name, get_stock_code_with_name
 
 
 # 设置使用tx数据源（不使用缓存包装，让AlphaLab处理数据存储）
@@ -389,16 +390,17 @@ def main():
         # 保存详细的交易记录和收益统计到CSV文件
         import csv
         
-        # 保存标的收益统计
+        # 保存标的收益统计（包含股票名称）
         returns_csv_path = os.path.join(result_dir, "symbol_returns.csv")
         with open(returns_csv_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["标的代码", "累计收益", "胜率(%)", "交易次数"])
+            writer.writerow(["标的代码", "标的名称", "累计收益", "胜率(%)", "交易次数"])
             for symbol in symbol_returns:
                 total_return = symbol_returns[symbol]
                 win_rate = symbol_win_rates.get(symbol, 0)
                 trade_count = sum(1 for trade in engine.trades.values() if trade.vt_symbol == symbol)
-                writer.writerow([symbol, f"{total_return:.2f}", f"{win_rate:.2f}", trade_count])
+                stock_name = get_stock_name(symbol)
+                writer.writerow([symbol, stock_name, f"{total_return:.2f}", f"{win_rate:.2f}", trade_count])
         
         # 保存策略整体统计
         stats_csv_path = os.path.join(result_dir, "strategy_stats.csv")
@@ -471,7 +473,7 @@ def main():
                 <h3>收益最高10个标的</h3>
                 <div class="symbol-list">
                     <ul>
-                        {''.join([f'<li>{symbol} (收益: {return_val:.2f}, 胜率: {symbol_win_rates[symbol]:.2f}%)</li>' for symbol, return_val in top_10])}
+                        {''.join([f'<li>{get_stock_code_with_name(symbol)} (收益: {return_val:.2f}, 胜率: {symbol_win_rates[symbol]:.2f}%)</li>' for symbol, return_val in top_10])}
                     </ul>
                 </div>
             </div>
@@ -480,7 +482,7 @@ def main():
                 <h3>中位收益10个标的</h3>
                 <div class="symbol-list">
                     <ul>
-                        {''.join([f'<li>{symbol} (收益: {return_val:.2f}, 胜率: {symbol_win_rates[symbol]:.2f}%)</li>' for symbol, return_val in mid_10])}
+                        {''.join([f'<li>{get_stock_code_with_name(symbol)} (收益: {return_val:.2f}, 胜率: {symbol_win_rates[symbol]:.2f}%)</li>' for symbol, return_val in mid_10])}
                     </ul>
                 </div>
             </div>
@@ -489,7 +491,7 @@ def main():
                 <h3>收益最低10个标的</h3>
                 <div class="symbol-list">
                     <ul>
-                        {''.join([f'<li>{symbol} (收益: {return_val:.2f}, 胜率: {symbol_win_rates[symbol]:.2f}%)</li>' for symbol, return_val in bottom_10])}
+                        {''.join([f'<li>{get_stock_code_with_name(symbol)} (收益: {return_val:.2f}, 胜率: {symbol_win_rates[symbol]:.2f}%)</li>' for symbol, return_val in bottom_10])}
                     </ul>
                 </div>
             </div>
@@ -566,8 +568,8 @@ def main():
                                            marker=dict(color="red", symbol="triangle-down", size=10), 
                                            name="卖出"), row=1, col=1)
                 
-                # 设置布局
-                fig.update_layout(title=f"{symbol} K线图 (收益: {total_return:.2f}, 胜率: {win_rate:.2f}%)", 
+                # 设置布局（包含股票名称）
+                fig.update_layout(title=f"{get_stock_code_with_name(symbol)} K线图 (收益: {total_return:.2f}, 胜率: {win_rate:.2f}%)", 
                                  height=500, width=1000)
                 
                 # 添加图表到HTML
