@@ -11,6 +11,7 @@ VeighNa是一套基于Python的开源量化交易系统开发框架，在开源�
 - 事件驱动架构，高效处理市场数据和交易信号
 - 跨平台支持（Windows、Linux、MacOS）
 - 丰富的可视化工具和回测系统
+- 本地数据缓存系统，提升数据查询性能
 
 ### 典型应用场景：
 - 量化交易策略的开发、回测与实盘交易
@@ -25,15 +26,24 @@ VeighNa项目采用模块化设计，核心功能集中在`vnpy`目录下，同�
 ```text
 ├── vnpy/             # 核心代码目录
 │   ├── alpha/        # AI量化模块（4.0新增）
+│   │   ├── dataset/  # 因子特征工程
+│   │   ├── model/    # 预测模型训练
+│   │   └── strategy/ # 策略投研开发
 │   ├── chart/        # K线图表模块
 │   ├── event/        # 事件驱动引擎
 │   ├── rpc/          # 跨进程通信模块
-│   ├── trader/       # 交易核心模块
+│   └── trader/       # 交易核心模块
+│       └── ui/       # 用户界面组件
 ├── docs/             # 文档目录
+│   ├── community/    # 社区文档
+│   ├── elite/        # 精英版文档
+│   └── design/       # 设计文档
 ├── examples/         # 示例代码
 ├── tests/            # 测试代码
+├── strategies/       # 策略实现
+├── tools/            # 工具脚本
 ├── README.md         # 项目说明
-├── pyproject.toml    # 项目配置和依赖
+└── pyproject.toml    # 项目配置和依赖
 ```
 
 ### 核心模块说明：
@@ -44,7 +54,7 @@ VeighNa项目采用模块化设计，核心功能集中在`vnpy`目录下，同�
 | chart | K线图表显示与实时数据更新 | vnpy/chart/ |
 | event | 事件驱动引擎，处理系统内事件分发 | vnpy/event/ |
 | rpc | 跨进程通信，支持分布式部署 | vnpy/rpc/ |
-| trader | 交易核心，包含订单管理、网关对接等 | vnpy/trader/ |
+| trader | 交易核心，包含订单管理、网关对接、数据缓存等 | vnpy/trader/ |
 
 ## 3. 系统架构与主流程
 
@@ -57,6 +67,7 @@ VeighNa采用事件驱动的分层架构，通过事件引擎实现各模块间�
 3. **网关（Gateway）**：负责与外部交易接口的对接，处理行情和交易指令。
 4. **应用（App）**：实现具体功能的模块，如策略引擎、回测系统等。
 5. **数据存储**：支持多种数据库适配器，用于存储行情和交易数据。
+6. **数据缓存层**：本地数据缓存系统，提升数据查询性能。
 
 ### 系统主流程：
 
@@ -64,6 +75,7 @@ VeighNa采用事件驱动的分层架构，通过事件引擎实现各模块间�
    - 创建事件引擎和主引擎
    - 添加网关和应用
    - 初始化各引擎组件
+   - 初始化数据缓存系统
 
 2. **运行阶段**：
    - 连接交易接口
@@ -75,6 +87,7 @@ VeighNa采用事件驱动的分层架构，通过事件引擎实现各模块间�
 3. **关闭阶段**：
    - 停止事件引擎
    - 关闭所有网关和应用
+   - 等待缓存任务完成
 
 ### 架构示意图：
 
@@ -105,6 +118,7 @@ flowchart TD
         Gateway[交易网关]
         Datafeed[数据服务]
         Database[数据库]
+        Cache[数据缓存]
     end
 
     subgraph 外部系统
@@ -136,6 +150,8 @@ flowchart TD
     EventEngine -->|分发事件| Algo
     EventEngine -->|分发事件| OmsEngine
 
+    Datafeed -->|缓存| Cache
+    Cache -->|查询| Datafeed
     Gateway -->|行情/成交| Exchange
     Datafeed -->|历史数据| DataService
 ```
@@ -152,11 +168,14 @@ flowchart TD
 - 持仓管理：实时更新持仓信息
 - 合约管理：维护合约信息
 - 事件处理：处理各类交易事件
+- 数据缓存：本地数据缓存系统
 
 **核心组件**：
 - `MainEngine`：系统核心控制器，管理所有网关和应用
 - `OmsEngine`：订单管理引擎，处理订单和成交
 - `BaseGateway`：网关基类，定义了与交易接口对接的标准方法
+- `CachedDatafeedWrapper`：带缓存的数据服务包装器
+- `ParquetCacheBackend`：Parquet格式缓存后端
 
 ### 4.2 AI量化模块（alpha）
 
@@ -167,12 +186,14 @@ AI量化模块是VeighNa 4.0版本的重要新增功能，提供了一站式多�
 - 预测模型训练：集成多种主流机器学习算法
 - 策略投研开发：基于ML信号预测模型构建量化交易策略
 - 投研流程管理：集成数据管理、模型训练、信号生成和策略回测等完整工作流程
+- Lookback数据加载：支持策略预加载历史数据
 
 **核心组件**：
-- `dataset`：因子特征工程模块，内置Alpha 158等因子集合
+- `dataset`：因子特征工程模块，内置Alpha 101、Alpha 158等因子集合
 - `model`：预测模型训练模块，支持Lasso、LightGBM、MLP等算法
 - `strategy`：策略投研开发模块，支持截面多标的和时序单标的策略
 - `lab`：投研流程管理模块，提供完整的工作流程支持
+- `BacktestingEngine`：回测引擎，支持策略回测和性能分析
 
 ### 4.3 事件驱动引擎（event）
 
@@ -230,7 +251,7 @@ K线图表模块提供了高性能的K线图表显示功能，支持大数据量
 
 **应用场景**：作为系统的中央控制器，用于管理和协调各个组件的运行。
 
-**源码位置**：[vnpy/trader/engine.py](file:///Users/bumblebee/workspace/finance/vnpy/vnpy/trader/engine.py)
+**源码位置**：[vnpy/trader/engine.py](vnpy/trader/engine.py)
 
 ### 5.2 EventEngine 类
 
@@ -245,7 +266,7 @@ K线图表模块提供了高性能的K线图表显示功能，支持大数据量
 
 **应用场景**：用于系统内各模块间的通信，实现解耦。
 
-**源码位置**：[vnpy/event/engine.py](file:///Users/bumblebee/workspace/finance/vnpy/vnpy/event/engine.py)
+**源码位置**：[vnpy/event/engine.py](vnpy/event/engine.py)
 
 ### 5.3 BaseGateway 类
 
@@ -261,7 +282,7 @@ K线图表模块提供了高性能的K线图表显示功能，支持大数据量
 
 **应用场景**：作为各种交易接口的基类，提供统一的接口标准。
 
-**源码位置**：[vnpy/trader/gateway.py](file:///Users/bumblebee/workspace/finance/vnpy/vnpy/trader/gateway.py)
+**源码位置**：[vnpy/trader/gateway.py](vnpy/trader/gateway.py)
 
 ### 5.4 OmsEngine 类
 
@@ -278,23 +299,61 @@ K线图表模块提供了高性能的K线图表显示功能，支持大数据量
 
 **应用场景**：用于管理订单、成交、持仓和账户信息。
 
-**源码位置**：[vnpy/trader/engine.py](file:///Users/bumblebee/workspace/finance/vnpy/vnpy/trader/engine.py)
+**源码位置**：[vnpy/trader/engine.py](vnpy/trader/engine.py)
 
-### 5.5 Alpha模块相关类
+### 5.5 BacktestingEngine 类
+
+**功能**：AI量化策略回测引擎，提供完整的策略回测功能。
+
+**主要方法**：
+- `set_parameters(vt_symbols, interval, start, end, capital, ...)`：设置回测参数
+- `add_strategy(strategy_class, setting, signal_df)`：添加策略
+- `load_data()`：加载历史数据
+- `load_lookback_data(lookback_period)`：加载Lookback数据
+- `run_backtesting(lookback_period)`：运行回测
+- `calculate_result()`：计算逐日盯市盈亏
+- `calculate_statistics()`：计算策略统计指标
+- `show_chart()`：显示回测图表
+- `show_performance(benchmark_symbol)`：显示策略绩效对比
+- `get_all_trades()`：获取所有交易记录
+- `get_all_orders()`：获取所有订单记录
+
+**应用场景**：用于AI量化策略的开发、训练和回测。
+
+**源码位置**：[vnpy/alpha/strategy/backtesting.py](vnpy/alpha/strategy/backtesting.py)
+
+### 5.6 CachedDatafeedWrapper 类
+
+**功能**：带缓存的数据服务包装器，提供本地数据缓存支持。
+
+**主要方法**：
+- `init(output)`：初始化缓存系统和网络数据源
+- `query_bar_history(req, output)`：查询K线数据（支持缓存）
+- `query_tick_history(req, output)`：查询Tick数据（支持缓存）
+- `wait_cache_tasks_complete(timeout)`：等待缓存任务完成
+- `cancel_cache_tasks()`：取消缓存任务
+
+**应用场景**：提升数据查询性能，减少网络请求。
+
+**源码位置**：[vnpy/trader/cached_datafeed.py](vnpy/trader/cached_datafeed.py)
+
+### 5.7 Alpha模块相关类
 
 **功能**：AI量化策略开发相关类。
 
 **主要类**：
 - `Dataset`：因子特征工程类
 - `Model`：预测模型类
-- `Strategy`：策略类
-- `Lab`：投研流程管理类
+- `AlphaStrategy`：策略类
+- `AlphaLab`：投研流程管理类
+- `PortfolioDailyResult`：投资组合每日盈亏结果类
+- `ContractDailyResult`：合约每日盈亏结果类
 
 **应用场景**：用于AI量化策略的开发、训练和回测。
 
-**源码位置**：[vnpy/alpha/](file:///Users/bumblebee/workspace/finance/vnpy/vnpy/alpha/)
+**源码位置**：[vnpy/alpha/](vnpy/alpha/)
 
-### 5.6 ChartWidget 类
+### 5.8 ChartWidget 类
 
 **功能**：K线图表组件，负责K线图表的显示。
 
@@ -305,7 +364,7 @@ K线图表模块提供了高性能的K线图表显示功能，支持大数据量
 
 **应用场景**：用于K线图表的显示和实时更新。
 
-**源码位置**：[vnpy/chart/widget.py](file:///Users/bumblebee/workspace/finance/vnpy/vnpy/chart/widget.py)
+**源码位置**：[vnpy/chart/widget.py](vnpy/chart/widget.py)
 
 ## 6. 技术栈与依赖
 
@@ -313,21 +372,21 @@ VeighNa使用了丰富的Python库和工具，以实现其功能。
 
 | 类别 | 技术/依赖 | 用途 | 版本要求 | 源码位置 |
 | ---- | --------- | ---- | -------- | -------- |
-| 核心语言 | Python | 主要开发语言 | >=3.10 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| GUI框架 | PySide6 | 图形界面 | ==6.8.2.1 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 数据处理 | numpy | 数值计算 | >=2.2.3 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 数据处理 | pandas | 数据处理 | >=2.2.3 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 数据处理 | polars | 高性能数据处理（alpha模块） | >=1.26.0 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 技术分析 | ta-lib | 技术指标计算 | >=0.6.4 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 机器学习 | scikit-learn | 机器学习算法（alpha模块） | >=1.6.1 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 机器学习 | lightgbm | 梯度提升决策树（alpha模块） | >=4.6.0 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 机器学习 | torch | 深度学习框架（alpha模块） | >=2.6.0 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 通信 | pyzmq | 消息队列 | >=26.3.0 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 可视化 | pyqtgraph | 图表绘制 | >=0.13.7 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 可视化 | plotly | 交互式图表 | >=6.0.0 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 工具 | loguru | 日志管理 | >=0.7.3 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 工具 | tqdm | 进度条 | >=4.67.1 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
-| 工具 | deap | 遗传算法 | >=1.4.2 | [pyproject.toml](file:///Users/bumblebee/workspace/finance/vnpy/pyproject.toml) |
+| 核心语言 | Python | 主要开发语言 | >=3.10 | [pyproject.toml](pyproject.toml) |
+| GUI框架 | PySide6 | 图形界面 | ==6.8.2.1 | [pyproject.toml](pyproject.toml) |
+| 数据处理 | numpy | 数值计算 | >=2.2.3 | [pyproject.toml](pyproject.toml) |
+| 数据处理 | pandas | 数据处理 | >=2.2.3 | [pyproject.toml](pyproject.toml) |
+| 数据处理 | polars | 高性能数据处理（alpha模块） | >=1.26.0 | [pyproject.toml](pyproject.toml) |
+| 技术分析 | ta-lib | 技术指标计算 | >=0.6.4 | [pyproject.toml](pyproject.toml) |
+| 机器学习 | scikit-learn | 机器学习算法（alpha模块） | >=1.6.1 | [pyproject.toml](pyproject.toml) |
+| 机器学习 | lightgbm | 梯度提升决策树（alpha模块） | >=4.6.0 | [pyproject.toml](pyproject.toml) |
+| 机器学习 | torch | 深度学习框架（alpha模块） | >=2.6.0 | [pyproject.toml](pyproject.toml) |
+| 通信 | pyzmq | 消息队列 | >=26.3.0 | [pyproject.toml](pyproject.toml) |
+| 可视化 | pyqtgraph | 图表绘制 | >=0.13.7 | [pyproject.toml](pyproject.toml) |
+| 可视化 | plotly | 交互式图表 | >=6.0.0 | [pyproject.toml](pyproject.toml) |
+| 工具 | loguru | 日志管理 | >=0.7.3 | [pyproject.toml](pyproject.toml) |
+| 工具 | tqdm | 进度条 | >=4.67.1 | [pyproject.toml](pyproject.toml) |
+| 工具 | deap | 遗传算法 | >=1.4.2 | [pyproject.toml](pyproject.toml) |
 
 ## 7. 关键模块与典型用例
 
@@ -354,6 +413,7 @@ VeighNa提供了标准化的数据服务接口`BaseDatafeed`（位于`vnpy.trade
 | Wind | 万得Wind金融终端 | 期货 | 分钟线（实时更新） | [vnpy_wind](https://github.com/vnpy/vnpy_wind) |
 | iFinD | 同花顺公司推出的金融数据终端 | 期货 | 分钟线（实时更新） | [vnpy_ifind](https://github.com/vnpy/vnpy_ifind) |
 | Tinysoft | 天软.NET金融分析平台 | 期货 | 分钟线（实时更新） | [vnpy_tinysoft](https://github.com/vnpy/vnpy_tinysoft) |
+| AKShare | 开源财经数据接口库 | 股票、期货 | 日线、分钟线 | [vnpy_akshare](vnpy_akshare/) |
 
 #### 数据源使用示例
 
@@ -368,44 +428,82 @@ datafeed = get_datafeed()
 
 # 配置数据源（需要在使用前配置）
 from vnpy.trader.setting import SETTINGS
-SETTINGS["datafeed.name"] = "rqdata"            # 选择数据服务
-SETTINGS["datafeed.username"] = "license"       # 用户名
-SETTINGS["datafeed.password"] = "your_token"    # 密码或token
+SETTINGS["datafeed.name"] = "akshare"            # 选择数据服务
+SETTINGS["datafeed.username"] = "license"        # 用户名
+SETTINGS["datafeed.password"] = "your_token"     # 密码或token
 ```
 
 #### 查询K线历史数据
 
 ```python
 req = HistoryRequest(
-    symbol="cu888",                    # 合约代码
-    exchange=Exchange.SHFE,            # 交易所
-    start=datetime(2019, 1, 1),       # 开始时间
-    end=datetime(2021, 1, 20),         # 结束时间
-    interval=Interval.DAILY            # 数据时间粒度
+    symbol="000001",                    # 合约代码
+    exchange=Exchange.SZSE,             # 交易所
+    start=datetime(2023, 1, 1),         # 开始时间
+    end=datetime(2024, 1, 1),           # 结束时间
+    interval=Interval.DAILY             # 数据时间粒度
 )
 
-# 获取K线历史数据
+# 获取K线历史数据（自动使用缓存）
 data = datafeed.query_bar_history(req)
 ```
 
-#### 查询Tick历史数据
+**示例位置**：[examples/download_bars/download_bars.ipynb](examples/download_bars/download_bars.ipynb)
 
-```python
-req = HistoryRequest(
-    symbol="cu888",
-    exchange=Exchange.SHFE,
-    start=datetime(2019, 1, 1),
-    end=datetime(2021, 1, 20),
-    interval=Interval.TICK             # Tick级别数据
-)
+### 7.2 数据缓存系统
 
-# 获取Tick历史数据
-data = datafeed.query_tick_history(req)
+VeighNa提供了基于本地Parquet文件的数据缓存系统，通过`CachedDatafeedWrapper`类实现。
+
+#### 缓存工作流程
+
+```
+1. 用户发起数据查询请求
+   └─▶ 2. 检查本地缓存是否有完整数据
+        ├─▶ 是：直接返回本地数据
+        └─▶ 否：3. 查询网络数据源获取缺失数据
+             └─▶ 4. 异步缓存网络数据到本地
+                  └─▶ 5. 合并本地和网络数据
+                       └─▶ 6. 返回完整数据给用户
 ```
 
-**示例位置**：[examples/download_bars/download_bars.ipynb](file:///Users/bumblebee/workspace/finance/vnpy/examples/download_bars/download_bars.ipynb)
+#### 使用缓存数据服务
 
-### 7.2 回测系统
+```python
+from vnpy.trader.cached_datafeed import create_cached_datafeed
+from vnpy.trader.datafeed import get_datafeed
+from vnpy.trader.object import HistoryRequest
+from vnpy.trader.constant import Interval, Exchange
+from datetime import datetime
+
+# 获取网络数据服务
+network_datafeed = get_datafeed()
+
+# 创建带缓存的数据服务
+cached_datafeed = create_cached_datafeed(network_datafeed)
+cached_datafeed.init()
+
+# 查询数据（自动使用缓存）
+req = HistoryRequest(
+    symbol="000001",
+    exchange=Exchange.SZSE,
+    interval=Interval.DAILY,
+    start=datetime(2023, 1, 1),
+    end=datetime.now()
+)
+
+bars = cached_datafeed.query_bar_history(req)
+```
+
+#### 缓存配置参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+| ---- | ---- | ------ | ---- |
+| min_cache_length | int | 10 | 最小缓存记录数 |
+| cache_backend | BaseCacheBackend | ParquetCacheBackend | 缓存后端实现 |
+
+**源码位置**：[vnpy/trader/cached_datafeed.py](vnpy/trader/cached_datafeed.py)
+
+### 7.3 回测系统
 
 VeighNa的回测系统位于`vnpy.alpha.strategy.backtesting`模块中的`BacktestingEngine`类，提供了完整的策略回测功能。
 
@@ -413,6 +511,7 @@ VeighNa的回测系统位于`vnpy.alpha.strategy.backtesting`模块中的`Backte
 
 **主要功能**：
 - 历史数据加载与管理
+- Lookback数据预加载
 - 策略信号模拟执行
 - 逐日盯市盈亏计算
 - 策略统计指标计算
@@ -422,6 +521,7 @@ VeighNa的回测系统位于`vnpy.alpha.strategy.backtesting`模块中的`Backte
 **核心组件**：
 - `BacktestingEngine`：回测引擎核心，负责策略回测的整个流程
 - `PortfolioDailyResult`：每日投资组合结果，计算每日盈亏
+- `ContractDailyResult`：合约每日盈亏结果
 
 #### 回测引擎配置
 
@@ -439,21 +539,23 @@ engine = BacktestingEngine(lab)
 
 # 设置回测参数
 engine.set_parameters(
-    vt_symbols=["rb888.SHFE"],          # 交易合约列表
-    interval=Interval.MINUTE,           # 数据周期
-    start=datetime(2020, 1, 1),         # 回测开始时间
-    end=datetime(2021, 1, 1),           # 回测结束时间
-    capital=1_000_000,                  # 起始资金
-    risk_free=0.03,                     # 无风险利率
-    annual_days=240                     # 年交易日数
+    vt_symbols=["000001.SZ", "600000.SH"],  # 交易合约列表
+    interval=Interval.DAILY,                 # 数据周期
+    start=datetime(2023, 1, 1),              # 回测开始时间
+    end=datetime(2024, 1, 1),                # 回测结束时间
+    capital=1_000_000,                       # 起始资金
+    risk_free=0.03,                          # 无风险利率
+    annual_days=240                          # 年交易日数
 )
 ```
 
-#### 加载历史数据
+#### 加载历史数据和Lookback数据
 
 ```python
-# 加载历史数据
-engine.load_data()
+# 加载历史数据（在run_backtesting中自动调用）
+# engine.load_data()
+
+# Lookback数据在run_backtesting中自动加载
 ```
 
 #### 运行回测
@@ -462,8 +564,8 @@ engine.load_data()
 # 添加策略
 engine.add_strategy(strategy_class, strategy_settings, signal_df)
 
-# 运行回测
-engine.run_backtesting()
+# 运行回测（自动加载Lookback数据、历史数据，执行策略）
+engine.run_backtesting(lookback_period=120)
 ```
 
 #### 计算回测结果
@@ -494,6 +596,8 @@ statistics = engine.calculate_statistics()
 | 最长回撤天数 | 最大回撤持续天数 |
 | 总/日均盈亏 | 总盈亏和日均盈亏 |
 | 总/日均手续费 | 总手续费和日均手续费 |
+| 总/日均成交金额 | 总成交金额和日均成交金额 |
+| 总/日均成交笔数 | 总成交笔数和日均成交笔数 |
 | Sharpe Ratio | 夏普比率 |
 | 收益回撤比 | 收益与最大回撤的比值 |
 
@@ -504,7 +608,7 @@ statistics = engine.calculate_statistics()
 engine.show_chart()
 
 # 显示策略表现（与基准对比）
-engine.show_performance(benchmark_symbol="IF888.CFFEX")
+engine.show_performance(benchmark_symbol="000300.SH")
 ```
 
 #### 完整使用示例
@@ -522,10 +626,10 @@ engine = BacktestingEngine(lab)
 
 # 配置回测参数
 engine.set_parameters(
-    vt_symbols=["rb888.SHFE", "hc888.SHFE"],
-    interval=Interval.MINUTE,
-    start=datetime(2020, 1, 1),
-    end=datetime(2021, 1, 1),
+    vt_symbols=["000001.SZ", "600000.SH"],
+    interval=Interval.DAILY,
+    start=datetime(2023, 1, 1),
+    end=datetime(2024, 1, 1),
     capital=1_000_000
 )
 
@@ -535,25 +639,25 @@ engine.load_data()
 # 添加策略并运行
 signal_df = lab.generate_signals()  # 生成信号
 engine.add_strategy(EquityDemoStrategy, {}, signal_df)
-engine.run_backtesting()
+engine.run_backtesting(lookback_period=120)
 
 # 计算结果
-engine.calculate_result()
+daily_df = engine.calculate_result()
 statistics = engine.calculate_statistics()
 
 # 可视化
 engine.show_chart()
-engine.show_performance("IF888.CFFEX")
+engine.show_performance("000300.SH")
 ```
 
-**源码位置**：[vnpy/alpha/strategy/backtesting.py](file:///Users/bumblebee/workspace/finance/vnpy/vnpy/alpha/strategy/backtesting.py)
+**源码位置**：[vnpy/alpha/strategy/backtesting.py](vnpy/alpha/strategy/backtesting.py)
 
 **示例Notebook**：
-- [examples/alpha_research/research_workflow_lasso.ipynb](file:///Users/bumblebee/workspace/finance/vnpy/examples/alpha_research/research_workflow_lasso.ipynb)
-- [examples/alpha_research/research_workflow_lgb.ipynb](file:///Users/bumblebee/workspace/finance/vnpy/examples/alpha_research/research_workflow_lgb.ipynb)
-- [examples/alpha_research/research_workflow_mlp.ipynb](file:///Users/bumblebee/workspace/finance/vnpy/examples/alpha_research/research_workflow_mlp.ipynb)
+- [examples/alpha_research/research_workflow_lasso.ipynb](examples/alpha_research/research_workflow_lasso.ipynb)
+- [examples/alpha_research/research_workflow_lgb.ipynb](examples/alpha_research/research_workflow_lgb.ipynb)
+- [examples/alpha_research/research_workflow_mlp.ipynb](examples/alpha_research/research_workflow_mlp.ipynb)
 
-### 7.3 CTA策略引擎
+### 7.4 CTA策略引擎
 
 **功能说明**：CTA（Commodity Trading Advisor）策略引擎，用于开发和运行CTA类策略。
 
@@ -587,9 +691,9 @@ if __name__ == "__main__":
     main()
 ```
 
-**示例位置**：[examples/veighna_trader/run.py](file:///Users/bumblebee/workspace/finance/vnpy/examples/veighna_trader/run.py)
+**示例位置**：[examples/veighna_trader/run.py](examples/veighna_trader/run.py)
 
-### 7.2 AI量化策略开发
+### 7.5 AI量化策略开发
 
 **功能说明**：使用alpha模块开发AI量化策略，包括因子特征工程、模型训练和策略回测。
 
@@ -601,13 +705,13 @@ if __name__ == "__main__":
 
 ```python
 # 基于Lasso回归模型的量化投研工作流
-from vnpy.alpha.lab import Lab
+from vnpy.alpha.lab import AlphaLab
 from vnpy.alpha.dataset import Dataset
 from vnpy.alpha.model import LassoModel
 from vnpy.alpha.strategy import EquityDemoStrategy
 
 # 创建投研实验室
-lab = Lab()
+lab = AlphaLab()
 
 # 准备数据
 dataset = Dataset()
@@ -624,9 +728,9 @@ results = strategy.backtest(dataset)
 print(results)
 ```
 
-**示例位置**：[examples/alpha_research/research_workflow_lasso.ipynb](file:///Users/bumblebee/workspace/finance/vnpy/examples/alpha_research/research_workflow_lasso.ipynb)
+**示例位置**：[examples/alpha_research/research_workflow_lasso.ipynb](examples/alpha_research/research_workflow_lasso.ipynb)
 
-### 7.3 行情记录模块
+### 7.6 行情记录模块
 
 **功能说明**：实时录制Tick或K线行情到数据库中，用于策略回测或实盘初始化。
 
@@ -660,13 +764,13 @@ if __name__ == "__main__":
     main()
 ```
 
-**示例位置**：[examples/data_recorder/data_recorder.py](file:///Users/bumblebee/workspace/finance/vnpy/examples/data_recorder/data_recorder.py)
+**示例位置**：[examples/data_recorder/data_recorder.py](examples/data_recorder/data_recorder.py)
 
 ## 8. 配置、部署与开发
 
 ### 8.1 环境准备
 
-- **系统要求**：Windows 11以上 / Windows Server 2022以上 / Ubuntu 22.04 LTS以上
+- **系统要求**：Windows 11以上 / Windows Server 2022以上 / Ubuntu 22.04 LTS以上 / macOS
 - **Python版本**：Python 3.10以上（64位），推荐使用Python 3.13
 - **推荐使用**：VeighNa团队为量化交易专门打造的Python发行版[VeighNa Studio](https://download.vnpy.com/veighna_studio-4.3.0.exe)，集成内置了VeighNa框架以及VeighNa Station量化管理平台
 
@@ -712,6 +816,7 @@ VeighNa使用`loguru`库实现了完善的日志系统，记录系统运行状�
 | 行情不更新 | 订阅失败或网络问题 | 检查订阅状态和网络连接 |
 | 订单无法成交 | 价格不合适或市场流动性不足 | 调整订单价格或数量 |
 | 策略性能不佳 | 策略参数不合适或市场环境变化 | 优化策略参数或调整策略逻辑 |
+| 缓存不生效 | 缓存配置未启用或缓存后端问题 | 检查配置和缓存后端初始化 |
 
 ### 9.3 性能优化
 
@@ -730,8 +835,9 @@ VeighNa是一款功能强大、架构清晰的量化交易系统开发框架，�
 4. **AI量化能力**：4.0版本新增的alpha模块，提供了强大的AI量化策略开发能力。
 5. **事件驱动架构**：采用事件驱动架构，实现各模块间的解耦和高效通信。
 6. **跨平台支持**：支持Windows、Linux、MacOS等多种操作系统。
-7. **活跃的社区**：拥有活跃的社区和完善的文档，便于学习和使用。
-8. **持续更新**：持续更新和改进，不断添加新功能和优化性能。
+7. **数据缓存系统**：提供本地数据缓存功能，显著提升数据查询性能。
+8. **活跃的社区**：拥有活跃的社区和完善的文档，便于学习和使用。
+9. **持续更新**：持续更新和改进，不断添加新功能和优化性能。
 
 VeighNa的设计理念是"By Traders, For Traders, AI-Powered"，旨在为量化交易员提供专业、高效、易用的量化交易系统开发框架。通过不断的发展和完善，VeighNa已经成为国内量化交易领域的重要工具，为量化交易的发展做出了积极贡献。
 
