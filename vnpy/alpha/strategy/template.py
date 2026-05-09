@@ -40,6 +40,17 @@ class AlphaStrategy(metaclass=ABCMeta):
             if hasattr(self, k):
                 setattr(self, k, v)
 
+    def preload_lookback(self, lookback_data: dict[str, list["BarData"]]) -> None:
+        """
+        Preload lookback data before initialization.
+        
+        Strategy implementations can override this method to handle lookback data
+        (e.g., pre-populating caches for MA calculations).
+        
+        :param lookback_data: Historical data for each symbol before backtest start
+        """
+        pass
+
     @abstractmethod
     def on_init(self) -> None:
         """Initialization callback"""

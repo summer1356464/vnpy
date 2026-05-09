@@ -63,6 +63,23 @@ class LanceBreitsteinStrategy(AlphaStrategy):
             f"MA({self.short_ma}/{self.medium_ma}/{self.long_ma}), "
             f"swing_window={self.swing_window}, pullback_tol={self.pullback_tolerance}"
         )
+    
+    def preload_lookback(self, lookback_data: Dict[str, List[BarData]]) -> None:
+        """
+        预加载 lookback 窗口数据（在 on_init 之前调用）
+        
+        :param lookback_data: 每个标的对应的历史数据列表（回测开始前的数据）
+        """
+        # 加载 lookback 数据到 bar_cache
+        for vt_symbol, bars in lookback_data.items():
+            if vt_symbol not in self.bar_cache:
+                self.bar_cache[vt_symbol] = deque(maxlen=self.lookback_days)
+            
+            # 添加 lookback 数据（只保留最近的 lookback_days 条）
+            for bar in bars[-self.lookback_days:]:
+                self.bar_cache[vt_symbol].append(bar)
+            
+            self.write_log(f"预加载 {vt_symbol}: {len(bars)} 条 lookback 数据，当前缓存大小: {len(self.bar_cache[vt_symbol])}")
 
     def on_bars(self, bars: Dict[str, BarData]):
         """每个交易日 K 线回调"""

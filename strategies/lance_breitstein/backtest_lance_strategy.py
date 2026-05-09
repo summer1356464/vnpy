@@ -207,8 +207,8 @@ def main():
     # 加载数据
     engine.load_data()
     
-    # 运行回测
-    engine.run_backtesting()
+    # 运行回测（传递策略参数中的 lookback_period）
+    engine.run_backtesting(lookback_period=lookback_days)
     
     # 计算结果
     daily_df = engine.calculate_result()

@@ -159,8 +159,57 @@ class BacktestingEngine:
 
         logger.info(f"========== 所有历史数据加载完成 ==========")
 
-    def run_backtesting(self) -> None:
-        """Start backtesting"""
+    def load_lookback_data(self, lookback_period: int = 120) -> dict[str, list[BarData]]:
+        """
+        加载 lookback 窗口的历史数据，供策略在 preload_lookback 中使用
+        
+        :param lookback_period: 回溯周期（天数）
+        :return: 每个标的对应的历史数据列表（回测开始之前的数据）
+        """
+        from datetime import timedelta
+        
+        # 计算 lookback 时间范围
+        lookback_end_dt: datetime = self.start  # lookback 数据在回测开始时间之前结束
+        lookback_start_dt: datetime = lookback_end_dt - timedelta(days=lookback_period)  # 多留一些缓冲
+        
+        logger.info(f"========== 开始加载 Lookback 数据 ==========")
+        logger.info(f"Lookback 时间范围：{lookback_start_dt} 至 {lookback_end_dt}")
+        
+        # 收集 lookback 数据
+        lookback_data: dict[str, list[BarData]] = {}
+        
+        for vt_symbol in self.vt_symbols:
+            # 直接从 AlphaLab 加载 lookback 数据
+            symbol_bars: list[BarData] = self.lab.load_bar_data(
+                vt_symbol,
+                self.interval,
+                lookback_start_dt,
+                lookback_end_dt
+            )
+            # 按时间排序
+            symbol_bars.sort(key=lambda x: x.datetime)
+            lookback_data[vt_symbol] = symbol_bars
+        
+        logger.info(f"========== Lookback 数据加载完成 ==========")
+        for vt_symbol, bars in lookback_data.items():
+            if bars:
+                logger.info(f"  {vt_symbol}: {len(bars)}条数据 ({bars[0].datetime} 至 {bars[-1].datetime})")
+        
+        return lookback_data
+    
+    def run_backtesting(self, lookback_period: int = 120) -> None:
+        """
+        Start backtesting
+        
+        :param lookback_period: 回溯周期（天数），用于预加载历史数据
+        """
+        # 先加载 lookback 数据
+        lookback_data = self.load_lookback_data(lookback_period)
+        
+        # 调用策略的 preload_lookback 方法（基类提供默认实现 pass）
+        self.strategy.preload_lookback(lookback_data)
+        
+        # 调用策略初始化
         self.strategy.on_init()
         logger.info("策略初始化完成")
 
