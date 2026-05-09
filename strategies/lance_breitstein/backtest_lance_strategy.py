@@ -6,6 +6,7 @@ from datetime import datetime
 import os
 import sys
 import asyncio
+import webbrowser
 
 from vnpy.trader.constant import Interval, Direction, Offset
 from vnpy.trader.setting import SETTINGS
@@ -190,9 +191,11 @@ def main():
         "stop_loss_ratio": 15    # 止损比例 (1R)
     }
     
-    # 异步下载全量沪深300成分股数据（包含回溯窗口）
-    print(f"\n开始下载全量 {len(vt_symbols)} 只沪深300成分股数据...")
-    asyncio.run(download_data(datafeed, lab, vt_symbols, interval, start, end, max_lookback))
+    # 异步下载全量沪深300成分股和基准指数数据（包含回溯窗口）
+    benchmark_symbol = "000300.SSE"  # 沪深300指数作为基准
+    download_symbols = vt_symbols + [benchmark_symbol]  # 加入基准指数到下载列表
+    print(f"\n开始下载 {len(download_symbols)} 只标的数据（含 {len(vt_symbols)} 只成分股 + 1只基准指数）...")
+    asyncio.run(download_data(datafeed, lab, download_symbols, interval, start, end, max_lookback))
     
     # 创建空的信号DataFrame
     import polars as pl
@@ -601,6 +604,11 @@ def main():
         print(f"- HTML报告：{html_file_path}")
         print(f"- 标的收益统计：{returns_csv_path}")
         print(f"- 策略整体统计：{stats_csv_path}")
+        
+        # 自动打开HTML报告
+        html_file_url = f"file://{os.path.abspath(html_file_path)}"
+        print(f"\n正在打开HTML报告...")
+        webbrowser.open(html_file_url)
 
 
 if __name__ == "__main__":
