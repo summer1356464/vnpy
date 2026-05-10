@@ -74,7 +74,8 @@ def main():
     # 设置回测参数
     vt_symbols = hs300_stocks
     interval = Interval.DAILY
-    start = datetime(2025, 1, 1)
+    # 调整回测时间为2017-2025年（多周期MACD需要更多历史数据）
+    start = datetime(2017, 1, 1)
     end = datetime(2025, 12, 31)
     capital = 1000000  # 初始资金100万
     
@@ -86,9 +87,12 @@ def main():
         capital=capital
     )
     
-    # 策略参数
-    exit_mode = "fixed_ratio"
-    lookback_days = 120
+    # 添加策略（参数与 LanceBreitsteinStrategy 新实现保持一致）
+    # 选择卖出模式："condition"(传统条件模式) 或 "fixed_ratio"(固定比例止盈止损模式)
+    exit_mode = "fixed_ratio"  # 默认使用固定比例模式
+    
+    # 策略参数（先定义，用于数据下载的回溯窗口计算）
+    lookback_days = 200  # 多周期MACD需要更多历史数据
     vwap_days = 20
     long_ma = 50
     max_lookback = max(lookback_days, vwap_days, long_ma * 2)
@@ -103,14 +107,15 @@ def main():
         "swing_window": 5,      # 摆动点识别窗口
         "pullback_tolerance": 0.03,  # 回踩容差 3%
         "position_size": 0.1,   # 每个标的最多占总资金 10%
-        "use_macd": True,       # 使用 MACD 替代均线多头判断
-        "macd_fast": 12,        # MACD 快速均线周期
-        "macd_slow": 26,        # MACD 慢速均线周期
-        "macd_signal": 9,       # MACD 信号线周期
+        "use_macd": True,              # 使用 MACD 替代均线多头判断
+        "macd_fast": 12,               # MACD 快速均线周期
+        "macd_slow": 26,               # MACD 慢速均线周期
+        "macd_signal": 9,              # MACD 信号线周期
         "use_multi_timeframe_macd": True,  # 使用多周期MACD共振（日线+周线+月线）
-        "weekly_macd_relaxed": True,   # 周线条件放宽
-        "monthly_macd_relaxed": True,  # 月线条件放宽
-        "allow_post_crossover": True,  # 允许金叉后趋势未破状态
+        "daily_macd_relaxed": True,    # 日线条件放宽（仅需MACD>信号线，不需要连续上升）
+        "weekly_macd_relaxed": True,   # 周线条件放宽（仅需MACD>信号线，不需要连续上升）
+        "monthly_macd_relaxed": True,  # 月线条件放宽（仅需MACD在零轴上方）
+        "allow_post_crossover": True,  # 允许周月线金叉后趋势未破状态
         "exit_mode": exit_mode,  # 卖出模式
         "take_profit_ratio": 45,  # 止盈比例 (3.5R)
         "stop_loss_ratio": 15    # 止损比例 (1R)

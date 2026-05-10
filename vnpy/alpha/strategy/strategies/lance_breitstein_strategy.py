@@ -20,7 +20,7 @@ class LanceBreitsteinStrategy(AlphaStrategy):
     """
 
     # 策略参数
-    lookback_days: int = 120      # 回溯天数（需足够计算所有指标）
+    lookback_days: int = 200      # 回溯天数（需足够计算所有指标，多周期MACD需要更多数据）
     vwap_days: int = 20           # VWAP 计算窗口
     short_ma: int = 10            # 短期均线 (MA10)
     medium_ma: int = 20           # 中期均线 (MA20，Lance 常用支撑位)
@@ -35,6 +35,11 @@ class LanceBreitsteinStrategy(AlphaStrategy):
     macd_fast: int = 12           # MACD 快速均线周期
     macd_slow: int = 26           # MACD 慢速均线周期
     macd_signal: int = 9          # MACD 信号线周期
+    use_multi_timeframe_macd: bool = True  # 是否使用多周期MACD共振（日线+周线+月线）
+    weekly_macd_relaxed: bool = True  # 周线条件是否放宽
+    monthly_macd_relaxed: bool = True  # 月线条件是否放宽
+    daily_macd_relaxed: bool = True  # 日线条件是否放宽（不需要连续上升3期）
+    allow_post_crossover: bool = True  # 是否允许周月线在金叉后（趋势未破）状态
     
     # 止盈止损参数
     exit_mode: str = "condition"  # 卖出模式："condition"(条件模式) 或 "fixed_ratio"(固定比例模式)
@@ -365,15 +370,28 @@ class LanceBreitsteinStrategy(AlphaStrategy):
     def check_macd_condition(self, bars: List[BarData]) -> bool:
         """
         MACD 多头条件判断：
+        - 如果 use_multi_timeframe_macd=True：需要日线、周线、月线三周期MACD共振金叉
+        - 如果 use_multi_timeframe_macd=False：仅日线MACD金叉
+        
+        每个周期的条件：
         - MACD 线在零轴上方（多头市场）
         - MACD 线 > 信号线（金叉状态）
         - 最近 3 期 MACD 值呈上升趋势
         """
         closes = [b.close_price for b in bars]
+        
+        if self.use_multi_timeframe_macd:
+            # 多周期共振模式
+            return self._check_multi_timeframe_macd(closes)
+        else:
+            # 单周期模式（仅日线）
+            return self._check_single_timeframe_macd(closes)
+
+    def _check_single_timeframe_macd(self, closes: List[float]) -> bool:
+        """单周期MACD判断（日线）"""
         if len(closes) < self.macd_slow + self.macd_signal:
             return False
 
-        # 计算 MACD
         macd_line, signal_line, _ = self._calc_macd(closes)
         
         if not macd_line or not signal_line:
@@ -384,12 +402,248 @@ class LanceBreitsteinStrategy(AlphaStrategy):
 
         # MACD 线在零轴上方
         macd_above_zero = macd_line[-1] > 0
-        # MACD 线 > 信号线（金叉）
-        macd_above_signal = macd_line[-1] > signal_line[-1]
+        # 金叉：DIF从下往上穿过DEA（真正的金叉过程）
+        golden_cross = macd_line[-2] <= signal_line[-2] and macd_line[-1] > signal_line[-1]
         # MACD 值连续上升（最近 3 期）
         macd_rising = macd_line[-1] > macd_line[-2] > macd_line[-3]
 
-        return macd_above_zero and macd_above_signal and macd_rising
+        return macd_above_zero and golden_cross and macd_rising
+
+    def _check_multi_timeframe_macd(self, closes: List[float]) -> bool:
+        """
+        多周期MACD共振判断：
+        - 日线MACD金叉（零轴上方+金叉）
+        - 周线MACD：金叉 或 金叉后趋势未破 或 MACD在零轴上方（根据 allow_post_crossover 参数）
+        - 月线MACD：金叉 或 金叉后趋势未破 或 MACD在零轴上方且有上升趋势（最宽松）
+        
+        金叉后趋势未破的定义：
+        - MACD线虽然可能低于信号线，但幅度不大
+        - MACD线仍在零轴附近（可略微为负，但不能太远）
+        - 近期曾出现过金叉状态
+        """
+        # 计算所需最小数据量
+        min_days = max(self.macd_slow + self.macd_signal + 10, 44 * 2)
+        if len(closes) < min_days:
+            self.write_log(f"数据不足，无法计算多周期MACD（需要{min_days}天，当前{len(closes)}天）")
+            return False
+
+        # 1. 日线MACD判断（必须金叉）
+        if self.daily_macd_relaxed:
+            daily_macd_ok = self._check_weekly_macd_relaxed(closes)
+        else:
+            daily_macd_ok = self._check_single_timeframe_macd(closes)
+        if not daily_macd_ok:
+            self.write_log("日线MACD不满足条件")
+            return False
+
+        # 2. 周线MACD判断（可配置条件）
+        weekly_closes = self._synthetic_weekly_data(closes)
+        weekly_min = self.macd_slow + self.macd_signal if not self.weekly_macd_relaxed else self.macd_slow
+        if len(weekly_closes) < weekly_min:
+            self.write_log(f"周线数据不足（需要{weekly_min}周，当前{len(weekly_closes)}周）")
+            return False
+        
+        if self.allow_post_crossover:
+            weekly_macd_ok = self._check_macd_with_post_crossover(weekly_closes)
+        elif self.weekly_macd_relaxed:
+            weekly_macd_ok = self._check_weekly_macd_relaxed(weekly_closes)
+        else:
+            weekly_macd_ok = self._check_single_timeframe_macd(weekly_closes)
+        
+        if not weekly_macd_ok:
+            self.write_log("周线MACD不满足条件")
+            return False
+
+        # # 3. 月线MACD判断（最宽松条件）
+        # monthly_closes = self._synthetic_monthly_data(closes)
+        # monthly_min = 6  # 月线最少需要6个月数据
+        # if len(monthly_closes) < monthly_min:
+        #     self.write_log(f"月线数据不足（需要{monthly_min}月，当前{len(monthly_closes)}月）")
+        #     return False
+        
+        # # 月线采用最宽松条件：只要MACD在零轴上方即可
+        # monthly_macd_ok = self._check_monthly_macd_most_relaxed(monthly_closes)
+        
+        # if not monthly_macd_ok:
+        #     self.write_log("月线MACD不满足条件")
+        #     return False
+
+        # 三周期都满足
+        self.write_log("日线、周线、月线MACD共振满足")
+        return True
+
+    def _check_macd_with_post_crossover(self, closes: List[float]) -> bool:
+        """
+        检查MACD是否满足条件：
+        1. 当前处于金叉状态（MACD线在零轴上方，且>信号线）
+        OR
+        2. 曾处于金叉状态，目前虽可能死叉但趋势未破（金叉后状态）
+        OR
+        3. MACD线在零轴上方（最宽松条件，用于月线）
+        
+        金叉后趋势未破的判断标准：
+        - MACD线在零轴附近（可略低于零，但幅度<20%平均波动）
+        - MACD线与信号线的差值不大（即使死叉，幅度也<30%）
+        - 近期（最近N期）曾出现过金叉
+        """
+        if len(closes) < self.macd_slow + self.macd_signal:
+            return False
+
+        macd_line, signal_line, _ = self._calc_macd(closes)
+        
+        if not macd_line or not signal_line:
+            return False
+        
+        if len(macd_line) < 5:
+            return False
+
+        # 条件1：当前处于金叉状态（最理想状态）
+        macd_above_zero = macd_line[-1] > 0
+        macd_above_signal = macd_line[-1] > signal_line[-1]
+        
+        if macd_above_zero and macd_above_signal:
+            return True
+        
+        # 条件2：金叉后趋势未破状态（允许短暂死叉但趋势未坏）
+        # 注：该方法仅在 allow_post_crossover=True 时被调用，无需再检查
+        if self._check_post_crossover_valid(macd_line, signal_line):
+            return True
+        
+        # 条件3：最宽松条件 - MACD线在零轴上方（长期多头趋势未破坏）
+        # 适用于月线等长期周期，只要整体趋势向上即可
+        if macd_line[-1] > 0:
+            return True
+        
+        return False
+
+    def _check_post_crossover_valid(self, macd_line: List[float], signal_line: List[float]) -> bool:
+        """
+        检查金叉后趋势是否未破：
+        - MACD线近期曾在零轴上方金叉
+        - 当前即使死叉，幅度也不大
+        - MACD线仍在零轴附近（未大幅跌破）
+        """
+        if len(macd_line) < 10:
+            return False
+
+        # 检查近期（最近10期）是否出现过金叉
+        has_recent_crossover = False
+        for i in range(max(0, len(macd_line)-10), len(macd_line)-1):
+            if macd_line[i] > 0 and macd_line[i] > signal_line[i]:
+                has_recent_crossover = True
+                break
+        
+        if not has_recent_crossover:
+            return False
+
+        # 计算平均波动幅度（用于判断"幅度不大"）
+        macd_values = [abs(v) for v in macd_line[-10:]]
+        avg_volatility = sum(macd_values) / len(macd_values) if macd_values else 0.001
+
+        # 当前MACD线不能大幅低于零轴（最多低于 avg_volatility * 0.5）
+        current_macd = macd_line[-1]
+        if current_macd < -avg_volatility * 0.5:
+            return False
+
+        # 当前即使死叉，差值也不能太大（最多 avg_volatility * 0.3）
+        diff = macd_line[-1] - signal_line[-1]
+        if diff < -avg_volatility * 0.3:
+            return False
+
+        # MACD线整体趋势不能是明显下降
+        if len(macd_line) >= 5:
+            recent_trend = macd_line[-1] - macd_line[-5]
+            if recent_trend < -avg_volatility:
+                return False
+
+        return True
+
+    def _check_weekly_macd_relaxed(self, closes: List[float]) -> bool:
+        """
+        周线MACD宽松判断：
+        - MACD线在零轴上方
+        - DIF向上穿过DEA（真正的金叉过程）
+        - 不需要连续上升条件
+        """
+        if len(closes) < self.macd_slow + self.macd_signal:
+            return False
+
+        macd_line, signal_line, _ = self._calc_macd(closes)
+        
+        if not macd_line or not signal_line:
+            return False
+        
+        if len(macd_line) < 2 or len(signal_line) < 2:
+            return False
+
+        # MACD线在零轴上方
+        macd_above_zero = macd_line[-1] > 0
+        
+        # 金叉：DIF从下往上穿过DEA
+        # 前一时刻 DIF < DEA，当前时刻 DIF > DEA
+        golden_cross = macd_line[-2] <= signal_line[-2] and macd_line[-1] > signal_line[-1]
+
+        return macd_above_zero and golden_cross
+
+    def _check_monthly_macd_most_relaxed(self, closes: List[float]) -> bool:
+        """
+        月线MACD最宽松判断：
+        - 仅需MACD线在零轴上方（表明长期趋势向上）
+        - 不要求金叉，不要求连续上升
+        - 适用于长期趋势确认
+        """
+        min_len = min(self.macd_slow, 15)  # 最少需要的数据量
+        if len(closes) < min_len:
+            return False
+
+        macd_line, _, _ = self._calc_macd(closes)
+        
+        if not macd_line or len(macd_line) < 1:
+            return False
+
+        # 最宽松条件：MACD线在零轴上方即可
+        return macd_line[-1] > 0
+
+    def _check_monthly_macd_relaxed(self, closes: List[float]) -> bool:
+        """
+        月线MACD宽松判断：
+        - 仅需MACD线在零轴上方（表明长期趋势向上）
+        - 不需要严格的金叉条件
+        """
+        if len(closes) < self.macd_slow + self.macd_signal:
+            return False
+
+        macd_line, _, _ = self._calc_macd(closes)
+        
+        if not macd_line or len(macd_line) < 1:
+            return False
+
+        # 仅检查MACD线在零轴上方
+        macd_above_zero = macd_line[-1] > 0
+        
+        return macd_above_zero
+
+    def _synthetic_weekly_data(self, daily_closes: List[float]) -> List[float]:
+        """
+        从日线数据合成周线数据（取每周最后一个收盘价作为周线收盘价）
+        假设每周5个交易日
+        """
+        weekly_closes = []
+        # 从第5个数据开始（第一周）
+        for i in range(4, len(daily_closes), 5):
+            weekly_closes.append(daily_closes[i])
+        return weekly_closes
+
+    def _synthetic_monthly_data(self, daily_closes: List[float]) -> List[float]:
+        """
+        从日线数据合成月线数据（取每月最后一个收盘价作为月线收盘价）
+        假设每月约22个交易日
+        """
+        monthly_closes = []
+        # 从第21个数据开始（第一个月）
+        for i in range(21, len(daily_closes), 22):
+            monthly_closes.append(daily_closes[i])
+        return monthly_closes
 
     def _calc_macd(self, data: List[float]) -> Tuple[List[float], List[float], List[float]]:
         """
