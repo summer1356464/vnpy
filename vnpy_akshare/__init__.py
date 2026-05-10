@@ -87,7 +87,7 @@ class Datafeed(BaseDatafeed):
                         symbol=symbol,
                         start_date=req.start.strftime("%Y%m%d"),
                         end_date=req.end.strftime("%Y%m%d"),
-                        adjust="qfq"
+                        adjust="hfq"
                     )
                 except Exception as e1:
                     output(f"方法1失败: {e1}")

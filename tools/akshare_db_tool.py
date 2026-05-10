@@ -189,7 +189,7 @@ class AkShareDatabaseTool:
             traceback.print_exc()
             return False
     
-    def save_historical_data(self, codes=None, start_date=None, end_date=None, adjust="qfq"):
+    def save_historical_data(self, codes=None, start_date=None, end_date=None, adjust="hfq"):
         """
         保存A股历史数据
         

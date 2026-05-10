@@ -74,7 +74,7 @@ def get_akshare_data(symbol, start_date, end_date, interval=Interval.DAILY):
             symbol=symbol,
             start_date=start_date.strftime("%Y%m%d"),
             end_date=end_date.strftime("%Y%m%d"),
-            adjust="qfq"
+            adjust="hfq"
         )
         
         # 转换为BarData对象

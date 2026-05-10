@@ -62,7 +62,7 @@ def download_data():
                     symbol=ak_symbol,
                     start_date=start_date.strftime("%Y%m%d"),
                     end_date=end_date.strftime("%Y%m%d"),
-                    adjust="qfq"
+                    adjust="hfq"
                 )
                 print(f"  ✓ 数据获取成功: {len(df)} 条记录")
                 

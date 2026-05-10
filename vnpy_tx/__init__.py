@@ -94,7 +94,7 @@ class Datafeed(BaseDatafeed):
                 symbol=ak_symbol,
                 start_date=start_date,
                 end_date=end_date,
-                adjust="qfq"  # 前复权
+                adjust="hfq"  # 后复权
             )
             
             if df.empty:

@@ -43,7 +43,7 @@ try:
         symbol="sh600519",  # 贵州茅台，上海市场
         start_date=start_date,
         end_date=end_date,
-        adjust="qfq"
+        adjust="hfq"
     )
     print(f"  ✓ 腾讯财经接口历史数据获取成功: {len(stock_zh_a_hist_tx_df)} 条记录")
     print(f"  ✓ 数据字段: {list(stock_zh_a_hist_tx_df.columns)}")
