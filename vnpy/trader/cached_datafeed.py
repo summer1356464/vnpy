@@ -8,6 +8,14 @@ from .constant import Interval, Exchange
 from .locale import _
 from .cache_backend import BaseCacheBackend, T
 from .parquet_cache_backend import ParquetCacheBackend
+from .stock_metadata import StockMetadataManager, DataStatus, StockMetadata
+
+
+# 导出增强版数据服务
+from .enhanced_cached_datafeed import (
+    EnhancedCachedDatafeedWrapper,
+    create_enhanced_cached_datafeed
+)
 
 
 class DatabaseCacheBackend(BaseCacheBackend[T]):

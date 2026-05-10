@@ -56,6 +56,35 @@ docs/
 - 配置与使用指南
 - 扩展与维护建议
 
+### 4. AlphaLab 投研缓存系统
+
+**核心文件**: `vnpy/alpha/lab.py`
+
+**主要内容**:
+- **Parquet 文件缓存**：使用 Polars 库实现高效的 K 线数据读写
+- **目录结构**：
+  - `daily/` - 日线数据缓存（`.parquet` 格式）
+  - `minute/` - 分钟线数据缓存（`.parquet` 格式）
+  - `component/` - 指数成分股数据（shelve 格式）
+  - `dataset/` - 因子数据集（pickle 格式）
+  - `model/` - 预测模型（pickle 格式）
+  - `signal/` - 信号数据（`.parquet` 格式）
+- **核心方法**：
+  - `save_bar_data()` - 保存 K 线数据到 Parquet 文件
+  - `load_bar_data()` - 从 Parquet 文件加载 K 线数据
+  - `load_bar_df()` - 批量加载多股票数据为 DataFrame
+  - `save_component_data()` - 保存指数成分股信息
+  - `load_component_data()` - 加载指数成分股信息
+- **数据格式**：
+  - 时间精度：纳秒级（`pl.Datetime(time_unit="ns")`）
+  - 数值类型：Float64 统一类型
+  - 支持字段：datetime, open, high, low, close, volume, turnover, open_interest
+- **缓存特性**：
+  - 自动去重：基于 datetime 字段去重
+  - 自动合并：新数据与已有数据合并
+  - 数据标准化：价格按首日收盘价归一化
+  - 停牌处理：成交量为 0 的行转换为 NaN
+
 ## 设计文档使用规范
 
 ### 1. 分析活动前
@@ -99,12 +128,16 @@ vnpy/                              # 核心代码目录
 ├── alpha/                         # AI量化模块
 │   ├── dataset/                   # 因子特征工程
 │   ├── model/                     # 预测模型训练
-│   └── strategy/                  # 策略投研开发
+│   ├── strategy/                  # 策略投研开发
+│   └── lab.py                     # AlphaLab 投研实验室（Parquet缓存核心）
 ├── chart/                         # K线图表模块
 ├── event/                         # 事件驱动引擎
 ├── rpc/                           # 跨进程通信模块
 └── trader/                        # 交易核心模块
-    └── ui/                        # 用户界面组件
+    ├── ui/                        # 用户界面组件
+    ├── cached_datafeed.py         # 数据服务缓存
+    ├── enhanced_cached_datafeed.py # 增强版缓存数据服务
+    └── stock_metadata.py          # 股票元信息管理
 
 docs/                              # 文档目录
 ├── community/                     # 社区文档
@@ -117,15 +150,71 @@ strategies/                        # 策略实现
 tools/                             # 工具脚本
 ```
 
+## AlphaLab 缓存目录结构
+
+```
+lab_path/                          # AlphaLab 数据根目录
+├── daily/                         # 日线数据缓存
+│   └── {vt_symbol}.parquet        # 单股票日线数据
+├── minute/                        # 分钟线数据缓存
+│   └── {vt_symbol}.parquet        # 单股票分钟线数据
+├── component/                     # 指数成分股数据
+│   └── {index_symbol}             # shelve 格式存储
+├── dataset/                       # 因子数据集
+│   └── {name}.pkl                 # pickle 格式
+├── model/                         # 预测模型
+│   └── {name}.pkl                 # pickle 格式
+├── signal/                        # 信号数据
+│   └── {name}.parquet             # parquet 格式
+└── contract.json                  # 合约配置信息
+```
+
 ## 核心模块入口
 
 | 模块 | 核心文件 | 主要职责 |
 |------|----------|----------|
 | 交易核心 | vnpy/trader/engine.py | 订单管理、账户管理、事件处理 |
-| AI量化 | vnpy/alpha/lab.py | 投研流程管理 |
+| AI量化/投研 | vnpy/alpha/lab.py | AlphaLab 投研实验室（Parquet 文件缓存核心） |
 | 回测引擎 | vnpy/alpha/strategy/backtesting.py | 策略回测 |
 | 事件引擎 | vnpy/event/engine.py | 事件分发和处理 |
-| 数据缓存 | vnpy/trader/cached_datafeed.py | 本地数据缓存 |
+| 数据缓存 | vnpy/trader/cached_datafeed.py | 数据服务缓存 |
+| 增强缓存 | vnpy/trader/enhanced_cached_datafeed.py | 增强版缓存数据服务（上市/退市时间检查） |
+| 元信息管理 | vnpy/trader/stock_metadata.py | 股票元信息管理（上市/退市时间、缓存状态） |
+
+## 双缓存架构说明
+
+VeighNa 采用**双缓存架构**，分别服务于不同的数据使用场景：
+
+### 1. DataFeed 缓存层（vnpy/trader/cached_datafeed.py）
+- **用途**：实时交易和数据获取时的临时缓存
+- **存储**：SQLite 数据库 + 可选 Parquet
+- **特点**：支持多种数据源、自动过期清理、异步写入
+
+### 2. AlphaLab 缓存层（vnpy/alpha/lab.py）
+- **用途**：量化投研和回测的核心数据仓库
+- **存储**：Parquet 文件（Polars 格式）
+- **特点**：
+  - **高性能**：列式存储，支持谓词下推和向量读取
+  - **大容量**：适合存储多年历史数据
+  - **标准化**：统一数据格式和类型
+  - **可追溯**：支持版本管理和增量更新
+
+### 3. 元信息管理层（vnpy/trader/stock_metadata.py）
+- **用途**：统一管理所有股票的元信息和缓存状态
+- **存储**：SQLite 数据库
+- **核心功能**：
+  - 记录上市/退市时间
+  - 追踪缓存数据范围
+  - 标记数据获取状态
+  - 验证缓存一致性
+
+### 缓存使用建议
+| 场景 | 推荐缓存层 | 说明 |
+|------|-----------|------|
+| 实时行情订阅 | DataFeed 缓存 | 低延迟、高时效性 |
+| 历史数据回测 | AlphaLab 缓存 | 高性能、大容量 |
+| 因子计算研究 | AlphaLab 缓存 | 支持 DataFrame 批量操作 |
+| 多数据源聚合 | 增强缓存层 | 自动处理数据一致性 |
 
 ## 测试方法
 
